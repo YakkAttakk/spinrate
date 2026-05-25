@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% block title %}New Review — SpinRate{% endblock %}
+{% block body %}
+<div class="container" style="max-width:680px;">
+  <div class="page-header">
+    <h1>New Review</h1>
+    <p class="text-muted">Search for an album or enter details manually</p>
+  </div>
+
+  {% if error %}<div class="alert">{{ error }}</div>{% endif %}
+
+  <form method="post" id="reviewForm">
+    <!-- Hidden enrichment fields -->
+    <input type="hidden" name="mb_id"        id="f_mb_id">
+    <input type="hidden" name="cover_url"    id="f_cover_url">
+    <input type="hidden" name="wiki_url"     id="f_wiki_url">
+    <input type="hidden" name="wiki_summary" id="f_wiki_summary">
+    <input type="hidden" name="year"         id="f_year">
+
+    <!-- Album search -->
+    <div class="form-group">
+      <label>Search Album</label>
+      <div class="autocomplete-wrap">
+        <input type="text" id="searchInput" placeholder="e.g. Rumours, Kind of Blue…"
+               autocomplete="off" style="padding-right:2.5rem;">
+        <div class="autocomplete-list" id="acList" style="display:none;"></div>
+      </div>
+      <div style="font-size:0.78rem;color:var(--muted);margin-top:0.4rem;">
+        Searches MusicBrainz — or fill in the fields below manually.
+      </div>
+    </div>
+
+    <!-- Album cover preview -->
+    <div id="coverPreview" style="display:none;margin-bottom:1.2rem;">
+      <div style="display:flex;align-items:flex-start;gap:1.2rem;">
+        <img id="coverImg" src="" alt="cover"
+             style="width:110px;height:110px;object-fit:cover;border:1px solid var(--border);">
+        <div>
+          <div id="previewTitle" style="font-family:var(--serif);font-size:1.1rem;"></div>
+          <div id="previewArtist" style="font-family:var(--mono);font-size:0.72rem;color:var(--muted);margin-top:0.25rem;"></div>
+          <div id="previewYear"   style="font-family:var(--mono);font-size:0.72rem;color:var(--muted);"></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+      <div class="form-group">
+        <label>Artist Name *</label>
+        <input type="text" name="artist_name" id="f_artist" required
+               placeholder="Fleetwood Mac">
+      </div>
+      <div class="form-group">
+        <label>Album Title *</label>
+        <input type="text" name="album_title" id="f_album" required
+               placeholder="Rumours">
+      </div>
+    </div>
+
+    <!-- Wikipedia info box -->
+    <div class="wiki-box" id="wikiBox">
+      <strong style="font-family:var(--mono);font-size:0.72rem;text-transform:uppercase;letter-spacing:0.07em;">Artist info</strong>
+      <p id="wikiSummary" style="margin-top:0.3rem;"></p>
+      <a id="wikiLink" href="#" target="_blank" rel="noopener"
+         style="font-family:var(--mono);font-size:0.72rem;">→ Wikipedia</a>
+    </div>
+
+    <div class="form-group mt3">
+      <label>Rating *</label>
+      <div class="star-picker">
+        <input type="radio" name="rating" id="s5" value="5"><label for="s5">★</label>
+        <input type="radio" name="rating" id="s4" value="4"><label for="s4">★</label>
+        <input type="radio" name="rating" id="s3" value="3"><label for="s3">★</label>
+        <input type="radio" name="rating" id="s2" value="2"><label for="s2">★</label>
+        <input type="radio" name="rating" id="s1" value="1"><label for="s1">★</label>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Your Review *</label>
+      <textarea name="body" required placeholder="What did you think? What stood out?"></textarea>
+    </div>
+
+    <div class="flex gap2 items-center">
+      <button type="submit" class="btn">Post Review</button>
+      <a href="/" class="btn btn-outline">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let searchTimer;
+const searchInput = document.getElementById('searchInput');
+const acList = document.getElementById('acList');
+const wikiBox = document.getElementById('wikiBox');
+let lastArtist = '';
+
+searchInput.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  const q = searchInput.value.trim();
+  if (q.length < 2) { acList.style.display = 'none'; return; }
+  searchTimer = setTimeout(() => doSearch(q), 350);
+});
+
+async function doSearch(q) {
+  try {
+    const res = await fetch(`/api/search-album?q=${encodeURIComponent(q)}`);
+    const items = await res.json();
+    renderAC(items);
+  } catch(e) {}
+}
+
+function renderAC(items) {
+  if (!items.length) { acList.style.display = 'none'; return; }
+  acList.innerHTML = '';
+  items.forEach(item => {
+    const div = document.createElement('div');
+    div.className = 'autocomplete-item';
+    div.innerHTML = `
+      ${item.cover_url
+        ? `<img src="${item.cover_url}" alt="" onerror="this.style.display='none'">`
+        : `<div style="width:40px;height:40px;background:var(--cream);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;">🎵</div>`}
+      <div>
+        <div class="ac-title">${item.title}</div>
+        <div class="ac-sub">${item.artist} ${item.year ? '· ' + item.year : ''}</div>
+      </div>`;
+    div.addEventListener('click', () => selectItem(item));
+    acList.appendChild(div);
+  });
+  acList.style.display = 'block';
+}
+
+function selectItem(item) {
+  acList.style.display = 'none';
+  searchInput.value = item.title + (item.artist ? ' — ' + item.artist : '');
+
+  document.getElementById('f_mb_id').value   = item.mb_id || '';
+  document.getElementById('f_year').value    = item.year || '';
+  document.getElementById('f_artist').value  = item.artist;
+  document.getElementById('f_album').value   = item.title;
+
+  // Cover
+  const coverUrl = item.mb_id ? `/api/cover/${item.mb_id}` : '';
+  document.getElementById('f_cover_url').value = coverUrl;
+
+  if (coverUrl) {
+    document.getElementById('coverImg').src = coverUrl;
+    document.getElementById('previewTitle').textContent  = item.title;
+    document.getElementById('previewArtist').textContent = item.artist;
+    document.getElementById('previewYear').textContent   = item.year || '';
+    document.getElementById('coverPreview').style.display = 'block';
+  }
+
+  // Fetch Wikipedia if artist changed
+  if (item.artist && item.artist !== lastArtist) {
+    lastArtist = item.artist;
+    fetchWiki(item.artist);
+  }
+}
+
+async function fetchWiki(artist) {
+  try {
+    const res = await fetch(`/api/artist-info?name=${encodeURIComponent(artist)}`);
+    const data = await res.json();
+    if (data.wiki_url || data.summary) {
+      document.getElementById('wikiSummary').textContent = data.summary || '';
+      const link = document.getElementById('wikiLink');
+      if (data.wiki_url) {
+        link.href = data.wiki_url;
+        link.style.display = 'inline';
+      } else {
+        link.style.display = 'none';
+      }
+      document.getElementById('f_wiki_url').value     = data.wiki_url || '';
+      document.getElementById('f_wiki_summary').value = data.summary || '';
+      wikiBox.style.display = 'block';
+    } else {
+      wikiBox.style.display = 'none';
+    }
+  } catch(e) {}
+}
+
+// Also fetch wiki when artist field is manually changed
+document.getElementById('f_artist').addEventListener('blur', function() {
+  const v = this.value.trim();
+  if (v && v !== lastArtist) { lastArtist = v; fetchWiki(v); }
+});
+
+// Close autocomplete on outside click
+document.addEventListener('click', e => {
+  if (!e.target.closest('.autocomplete-wrap')) acList.style.display = 'none';
+});
+</script>
+{% endblock %}

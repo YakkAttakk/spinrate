@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Feed — SpinRate{% endblock %}
+{% block body %}
+<div class="container">
+  <div class="page-header flex justify-between items-center wrap gap2">
+    <div>
+      <h1>Recent Reviews</h1>
+      <p class="text-muted">What your crew has been listening to</p>
+    </div>
+    <a href="/new-review" class="btn">+ Write a Review</a>
+  </div>
+
+  {% if reviews %}
+  <div class="feed">
+    {% for r in reviews %}
+    <div class="review-card">
+      {% if r.cover_url %}
+        <img class="cover" src="{{ r.cover_url }}" alt="{{ r.album_title }}" loading="lazy"
+             onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+        <div class="cover-placeholder" style="display:none;">🎵</div>
+      {% else %}
+        <div class="cover-placeholder">🎵</div>
+      {% endif %}
+      <div>
+        <div class="review-meta">
+          <a href="/profile/{{ r.username }}">{{ r.username }}</a>
+          &nbsp;·&nbsp;
+          <a href="/artist/{{ r.artist_id }}">{{ r.artist_name }}</a>
+          &nbsp;·&nbsp;
+          {{ r.created[:10] }}
+        </div>
+        <div class="review-album">
+          <a href="/album/{{ r.album_id }}">{{ r.album_title }}</a>
+          {% if r.year %}<span class="text-muted" style="font-size:0.8rem;font-family:var(--mono);"> ({{ r.year }})</span>{% endif %}
+        </div>
+        <div class="mt1" data-stars="{{ r.rating }}"></div>
+        <div class="review-body">{{ r.body }}</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">
+    <div class="big">🎶</div>
+    No reviews yet. <a href="/new-review" style="color:var(--accent);">Be the first!</a>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

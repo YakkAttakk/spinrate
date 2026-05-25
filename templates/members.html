@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Members — SpinRate{% endblock %}
+{% block body %}
+<div class="container" style="max-width:640px;">
+  <div class="page-header">
+    <h1>The Crew</h1>
+    <p class="text-muted">Everyone on SpinRate</p>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:1rem;">
+    {% for u in users %}
+    <a href="/profile/{{ u.username }}" style="text-decoration:none;color:inherit;">
+      <div class="card flex items-center gap2"
+           style="transition:border-color 0.15s,box-shadow 0.15s;cursor:pointer;"
+           onmouseover="this.style.borderColor='var(--accent)';this.style.boxShadow='3px 3px 0 var(--accent)'"
+           onmouseout="this.style.borderColor='var(--border)';this.style.boxShadow='none'">
+        <div class="avatar-circle">{{ u.username[0].upper() }}</div>
+        <div style="flex:1;">
+          <div style="font-family:var(--serif);font-size:1.1rem;">{{ u.username }}</div>
+          {% if u.bio %}
+            <div style="font-size:0.82rem;color:var(--muted);margin-top:0.15rem;">{{ u.bio }}</div>
+          {% endif %}
+        </div>
+        <div style="text-align:right;flex-shrink:0;">
+          <div class="badge text-muted">{{ u.review_count }} review{{ 's' if u.review_count != 1 }}</div>
+          <div style="font-family:var(--mono);font-size:0.68rem;color:var(--muted);margin-top:0.3rem;">since {{ u.created[:7] }}</div>
+        </div>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+
+  {% if me %}
+  <div style="margin-top:2rem;padding:1rem;border:1px dashed var(--border);border-radius:2px;text-align:center;">
+    <p class="text-muted" style="font-size:0.82rem;font-family:var(--mono);">
+      To invite friends, share your SpinRate URL and have them register.
+    </p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

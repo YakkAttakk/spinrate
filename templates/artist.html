@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}{{ artist.name }} — SpinRate{% endblock %}
+{% block body %}
+<div class="container">
+  <div class="page-header">
+    <div class="flex items-center gap2 wrap">
+      <div>
+        <p class="text-mono text-muted" style="margin-bottom:0.3rem;">Artist</p>
+        <h1>{{ artist.name }}</h1>
+        <div class="flex gap2 mt2 wrap items-center">
+          {% if artist.wiki_url %}
+            <a href="{{ artist.wiki_url }}" target="_blank" rel="noopener"
+               class="badge" style="color:var(--accent);border-color:var(--accent);text-decoration:none;">
+              → Wikipedia
+            </a>
+          {% endif %}
+          <span class="badge text-muted">{{ albums|length }} album{{ 's' if albums|length != 1 }}</span>
+        </div>
+      </div>
+    </div>
+    {% if artist.wiki_summary %}
+      <p style="margin-top:1rem;max-width:640px;font-size:0.88rem;color:#4a4540;border-left:3px solid var(--gold);padding-left:1rem;">
+        {{ artist.wiki_summary }}
+      </p>
+    {% endif %}
+  </div>
+
+  {% if albums %}
+    <div class="album-grid">
+      {% for al in albums %}
+        <a href="/album/{{ al.id }}" class="album-tile">
+          {% if al.cover_url %}
+            <img src="{{ al.cover_url }}" alt="{{ al.title }}" loading="lazy"
+                 onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+            <div class="cover-ph" style="display:none;">🎵</div>
+          {% else %}
+            <div class="cover-ph">🎵</div>
+          {% endif %}
+          <div class="album-tile-info">
+            <div class="album-tile-title">{{ al.title }}</div>
+            <div class="album-tile-sub">
+              {% if al.year %}{{ al.year }} · {% endif %}
+              {% if al.avg_rating %}
+                ★ {{ al.avg_rating }} ({{ al.review_count }})
+              {% else %}
+                No reviews yet
+              {% endif %}
+            </div>
+          </div>
+        </a>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="empty"><div class="big">💿</div>No albums yet.</div>
+  {% endif %}
+</div>
+{% endblock %}

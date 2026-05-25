@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}{{ album.title }} — SpinRate{% endblock %}
+{% block body %}
+<div class="container">
+
+  <!-- Album header -->
+  <div style="display:grid;grid-template-columns:180px 1fr;gap:2rem;margin-bottom:2.5rem;align-items:start;">
+    <div>
+      {% if album.cover_url %}
+        <img src="{{ album.cover_url }}" alt="{{ album.title }}"
+             style="width:180px;height:180px;object-fit:cover;border:1px solid var(--border);box-shadow:4px 4px 0 var(--ink);"
+             onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+        <div style="width:180px;height:180px;background:var(--cream);border:1px solid var(--border);display:none;align-items:center;justify-content:center;font-size:4rem;">🎵</div>
+      {% else %}
+        <div style="width:180px;height:180px;background:var(--cream);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:4rem;box-shadow:4px 4px 0 var(--ink);">🎵</div>
+      {% endif %}
+    </div>
+
+    <div>
+      <p class="text-mono text-muted" style="margin-bottom:0.3rem;">Album</p>
+      <h1 style="font-family:var(--serif);font-size:2.2rem;line-height:1.15;">{{ album.title }}</h1>
+      <div style="margin-top:0.6rem;">
+        <a href="/artist/{{ album.artist_id }}"
+           style="font-family:var(--serif);font-size:1.2rem;font-style:italic;color:var(--accent);text-decoration:none;">
+          {{ album.artist_name }}
+        </a>
+        {% if album.year %}
+          <span class="text-muted text-mono" style="font-size:0.8rem;margin-left:0.75rem;">{{ album.year }}</span>
+        {% endif %}
+      </div>
+
+      {% if reviews %}
+        {% set avg = (reviews | map(attribute='rating') | list | sum) / reviews|length %}
+        <div class="flex items-center gap1 mt2">
+          <span data-stars="{{ avg|round|int }}"></span>
+          <span class="text-mono text-muted" style="font-size:0.72rem;">
+            {{ '%.1f'|format(avg) }} avg · {{ reviews|length }} review{{ 's' if reviews|length != 1 }}
+          </span>
+        </div>
+      {% endif %}
+
+      <div class="flex gap2 mt2 wrap">
+        {% if album.wiki_url %}
+          <a href="{{ album.wiki_url }}" target="_blank" rel="noopener"
+             class="badge" style="color:var(--accent);border-color:var(--accent);text-decoration:none;">
+            → Artist on Wikipedia
+          </a>
+        {% endif %}
+        {% if not my_review %}
+          <a href="/new-review" class="btn" style="padding:0.4rem 1rem;font-size:0.72rem;">+ Review this album</a>
+        {% endif %}
+      </div>
+
+      {% if album.wiki_summary %}
+        <p style="margin-top:1rem;font-size:0.85rem;color:#4a4540;border-left:3px solid var(--gold);padding-left:0.85rem;max-width:520px;">
+          {{ album.wiki_summary }}
+        </p>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- My review banner -->
+  {% if my_review %}
+  <div class="card" style="background:var(--cream);border-color:var(--gold);margin-bottom:1.5rem;">
+    <div class="flex justify-between items-center wrap gap2">
+      <div>
+        <div class="text-mono text-muted" style="font-size:0.7rem;margin-bottom:0.3rem;">Your review</div>
+        <div data-stars="{{ my_review.rating }}"></div>
+        <p style="font-size:0.875rem;margin-top:0.4rem;">{{ my_review.body }}</p>
+      </div>
+      <form method="post" action="/delete-review/{{ my_review.id }}"
+            onsubmit="return confirm('Delete your review?')">
+        <button type="submit" class="btn btn-danger" style="font-size:0.72rem;padding:0.4rem 0.9rem;">Delete</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- All reviews -->
+  <h2 style="font-family:var(--serif);font-size:1.4rem;margin-bottom:1.2rem;">
+    Reviews <span class="text-muted text-mono" style="font-size:0.85rem;">({{ reviews|length }})</span>
+  </h2>
+
+  {% if reviews %}
+    <div class="feed">
+      {% for r in reviews %}
+        {% if not my_review or r.id != my_review.id %}
+        <div class="card">
+          <div class="flex justify-between items-center wrap gap2" style="margin-bottom:0.5rem;">
+            <div class="flex items-center gap2">
+              <div class="avatar-circle" style="width:36px;height:36px;font-size:1rem;">
+                {{ r.username[0].upper() }}
+              </div>
+              <div>
+                <a href="/profile/{{ r.username }}"
+                   style="font-family:var(--mono);font-size:0.8rem;color:var(--ink);text-decoration:none;font-weight:500;">
+                  {{ r.username }}
+                </a>
+                <div class="text-muted" style="font-family:var(--mono);font-size:0.68rem;">{{ r.created[:10] }}</div>
+              </div>
+            </div>
+            <div data-stars="{{ r.rating }}"></div>
+          </div>
+          <p style="font-size:0.875rem;color:#3a3530;">{{ r.body }}</p>
+        </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="empty">
+      <div class="big">📝</div>
+      No reviews yet. <a href="/new-review" style="color:var(--accent);">Write one!</a>
+    </div>
+  {% endif %}
+
+</div>
+{% endblock %}
