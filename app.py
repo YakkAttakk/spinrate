@@ -120,8 +120,9 @@ def init_db():
                 genre        TEXT,
                 wiki_url     TEXT,
                 wiki_summary TEXT,
-                wiki_infobox TEXT,
-                created      TEXT    DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS')),
+                wiki_infobox  TEXT,
+                wiki_reception TEXT,
+                created       TEXT    DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS')),
                 UNIQUE(artist_id, title)
             );
             CREATE TABLE IF NOT EXISTS reviews (
@@ -177,8 +178,9 @@ def init_db():
                 genre       TEXT,
                 wiki_url    TEXT,
                 wiki_summary TEXT,
-                wiki_infobox TEXT,
-                created     TEXT    DEFAULT (datetime('now')),
+                wiki_infobox  TEXT,
+                wiki_reception TEXT,
+                created       TEXT    DEFAULT (datetime('now')),
                 UNIQUE(artist_id, title)
             );
             CREATE TABLE IF NOT EXISTS reviews (
@@ -559,7 +561,7 @@ def fetch_infobox(wiki_url):
             # Clean up common artifacts
             import re
             value = re.sub(r'\s+', ' ', value).strip()
-            value = re.sub(r'\[.*?\]', '', value).strip()  # remove [note] refs
+            value = re.sub(r'[.*?]', '', value).strip()  # remove [note] refs
             value = value.strip('/ ').strip()
             if not label or not value:
                 continue
@@ -575,6 +577,203 @@ def fetch_infobox(wiki_url):
             rows.append({'label': label, 'value': value})
 
         return json.dumps(rows) if rows else None
+
+    except Exception:
+        return None
+
+def fetch_critical_reception(wiki_url):
+    """Extract critical reception data from a Wikipedia album page.
+
+    Returns a JSON string with:
+      {
+        "reviews": [{"publication": str, "score": str}, ...],
+        "summary": str   # prose from the reception section
+      }
+    Or None if nothing found.
+    """
+    if not wiki_url:
+        return None
+    try:
+        import re
+        from html.parser import HTMLParser
+
+        title = wiki_url.rstrip('/').split('/wiki/')[-1]
+
+        # Fetch full page HTML (all sections)
+        qs = urllib.parse.urlencode({
+            'action': 'parse', 'page': urllib.parse.unquote(title),
+            'prop': 'text', 'format': 'json',
+            'disablelot': '1', 'disableeditsection': '1'
+        })
+        req = urllib.request.Request(
+            f"https://en.wikipedia.org/w/api.php?{qs}", headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read())
+
+        html = data.get('parse', {}).get('text', {}).get('*', '')
+        if not html:
+            return None
+
+        # ----------------------------------------------------------------
+        # Step 1: Extract review score table (wikitable inside reception)
+        # Wikipedia encodes these as a table with columns Publication | Score
+        # ----------------------------------------------------------------
+        class ReceptionParser(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.reviews = []
+                self.summary_paragraphs = []
+
+                # State for finding the reception section
+                self.in_reception = False
+                self.reception_keywords = {
+                    'critical reception', 'critical response',
+                    'reception', 'reviews', 'critical acclaim',
+                    'commercial performance and critical reception'
+                }
+
+                # State for parsing the review table
+                self.in_table = False
+                self.in_row = False
+                self.in_cell = False
+                self.cell_idx = 0
+                self.current_pub = ''
+                self.current_score = ''
+                self.table_depth = 0
+                self.depth = 0
+                self.header_row = True
+
+                # State for prose paragraphs
+                self.in_para = False
+                self.current_para = ''
+                self.after_heading = False
+
+            def handle_starttag(self, tag, attrs):
+                attrs_dict = dict(attrs)
+                classes = attrs_dict.get('class', '')
+
+                # Detect reception heading (h2/h3 with matching text)
+                if tag in ('h2', 'h3', 'h4'):
+                    self.pending_heading = True
+                    self.heading_text = ''
+
+                if self.in_reception:
+                    # Another h2 ends the reception section
+                    if tag == 'h2':
+                        self.in_reception = False
+
+                    if tag == 'table' and ('wikitable' in classes or 'mw-collapsible' in classes):
+                        self.in_table = True
+                        self.table_depth = self.depth
+                        self.header_row = True
+
+                    if self.in_table:
+                        if tag == 'tr':
+                            self.in_row = True
+                            self.cell_idx = 0
+                            self.current_pub = ''
+                            self.current_score = ''
+                        if tag in ('td', 'th'):
+                            self.in_cell = True
+                        if tag == 'br':
+                            if self.in_cell:
+                                self.current_score += ' '
+
+                    if tag == 'p' and not self.in_table:
+                        self.in_para = True
+                        self.current_para = ''
+                        self.after_heading = False
+
+                    if tag == 'br' and self.in_para:
+                        self.current_para += ' '
+
+                self.depth += 1
+
+            def handle_endtag(self, tag):
+                self.depth -= 1
+
+                if tag in ('h2', 'h3', 'h4'):
+                    heading = getattr(self, 'heading_text', '').lower().strip()
+                    if any(k in heading for k in self.reception_keywords):
+                        self.in_reception = True
+                        self.after_heading = True
+                    self.pending_heading = False
+
+                if not self.in_reception:
+                    return
+
+                if self.in_table:
+                    if tag in ('td', 'th'):
+                        self.in_cell = False
+                        self.cell_idx += 1
+                    if tag == 'tr' and self.in_row:
+                        self.in_row = False
+                        if not self.header_row:
+                            pub   = self.current_pub.strip()
+                            score = self.current_score.strip()
+                            # Clean up score: remove footnote refs like [1]
+                            score = re.sub(r'[.*?]', '', score).strip()
+                            score = re.sub(r'\s+', ' ', score).strip()
+                            if pub and score and len(pub) < 80 and len(score) < 40:
+                                self.reviews.append({
+                                    'publication': pub,
+                                    'score': score
+                                })
+                        self.header_row = False
+
+                    if tag == 'table' and self.depth == self.table_depth:
+                        self.in_table = False
+
+                if tag == 'p' and self.in_para:
+                    self.in_para = False
+                    para = self.current_para.strip()
+                    para = re.sub(r'[.*?]', '', para)  # strip footnote refs
+                    para = re.sub(r'\s+', ' ', para).strip()
+                    if para and len(para) > 80:
+                        self.summary_paragraphs.append(para)
+
+            def handle_data(self, data):
+                if getattr(self, 'pending_heading', False):
+                    self.heading_text = getattr(self, 'heading_text', '') + data
+
+                if not self.in_reception:
+                    return
+
+                text = data.strip()
+                if not text:
+                    return
+
+                if self.in_table and self.in_cell:
+                    if self.cell_idx == 0:
+                        self.current_pub   += text + ' '
+                    elif self.cell_idx == 1:
+                        self.current_score += text + ' '
+
+                if self.in_para:
+                    self.current_para += data
+
+        parser = ReceptionParser()
+        parser.feed(html)
+
+        # Build prose summary from first 1-2 paragraphs
+        prose = ''
+        for p in parser.summary_paragraphs[:2]:
+            if len(prose) + len(p) < 600:
+                prose += p + ' '
+        prose = prose.strip()
+        if len(prose) > 550:
+            prose = prose[:550].rsplit(' ', 1)[0] + '…'
+
+        if not parser.reviews and not prose:
+            return None
+
+        result = {}
+        if parser.reviews:
+            result['reviews'] = parser.reviews[:15]  # cap at 15 publications
+        if prose:
+            result['summary'] = prose
+
+        return json.dumps(result)
 
     except Exception:
         return None
@@ -885,9 +1084,29 @@ def album(album_id):
     for c in comments_raw:
         comments.setdefault(c['review_id'], []).append(c)
     infobox = json.loads(al['wiki_infobox']) if al['wiki_infobox'] else []
+
+    # Lazily fetch and cache critical reception on first visit
+    if al['wiki_url'] and not al['wiki_reception']:
+        try:
+            reception_json = fetch_critical_reception(al['wiki_url'])
+            if reception_json:
+                execute("UPDATE albums SET wiki_reception=? WHERE id=?",
+                        (reception_json, album_id))
+                commit()
+                al = query("""
+                    SELECT al.*, ar.name as artist_name, ar.id as artist_id,
+                           ar.wiki_url as ar_wiki_url, ar.wiki_summary as ar_wiki_summary
+                    FROM albums al JOIN artists ar ON ar.id = al.artist_id
+                    WHERE al.id = ?
+                """, (album_id,), one=True)
+        except Exception:
+            pass
+
+    reception = json.loads(al['wiki_reception']) if al['wiki_reception'] else {}
     return render_template('album.html', me=me, album=al,
                            reviews=reviews, my_review=my_review,
-                           comments=comments, infobox=infobox)
+                           comments=comments, infobox=infobox,
+                           reception=reception)
 
 @app.route('/new-review', methods=['GET', 'POST'])
 @login_required

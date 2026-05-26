@@ -109,6 +109,43 @@
     </div>
   </div>
 
+  <!-- Critical Reception -->
+  {% if reception %}
+  <div class="card" style="margin-bottom:2rem;background:var(--cream);">
+    <div style="font-family:var(--mono);font-size:0.72rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:1rem;">
+      Critical Reception
+      <span style="font-size:0.65rem;margin-left:0.5rem;color:var(--border);">via Wikipedia</span>
+    </div>
+
+    {% if reception.summary %}
+      <p style="font-size:0.85rem;color:#3a3530;line-height:1.65;margin-bottom:{% if reception.reviews %}1.25rem{% else %}0{% endif %};">
+        {{ reception.summary }}
+      </p>
+    {% endif %}
+
+    {% if reception.reviews %}
+    <div style="overflow-x:auto;">
+      <table style="border-collapse:collapse;width:100%;font-size:0.82rem;">
+        <thead>
+          <tr style="border-bottom:2px solid var(--border);">
+            <th style="text-align:left;padding:0.3rem 1rem 0.3rem 0;font-family:var(--mono);font-size:0.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.07em;font-weight:normal;">Publication</th>
+            <th style="text-align:left;padding:0.3rem 0;font-family:var(--mono);font-size:0.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.07em;font-weight:normal;">Score</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in reception.reviews %}
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:0.35rem 1rem 0.35rem 0;color:#3a3530;white-space:nowrap;">{{ r.publication }}</td>
+            <td style="padding:0.35rem 0;font-family:var(--mono);color:var(--accent);font-weight:500;">{{ r.score }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
   <!-- My review banner -->
   {% if my_review %}
   <div class="card" style="background:var(--cream);border-color:var(--gold);margin-bottom:1.5rem;" id="review-{{ my_review.id }}">
