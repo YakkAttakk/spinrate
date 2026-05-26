@@ -152,6 +152,9 @@
                   {% for i in range(1, 6) %}
                     <span style="color:{% if i <= filled %}var(--gold){% else %}var(--border){% endif %};font-size:0.9rem;">★</span>
                   {% endfor %}
+                  <span style="font-family:var(--mono);font-size:0.72rem;color:var(--muted);margin-left:0.4rem;">
+                    {{ "%.2f"|format(r.score_normalized) }} / 5
+                  </span>
                 {% else %}
                   <span class="text-mono text-muted" style="font-size:0.75rem;">N/A</span>
                 {% endif %}
