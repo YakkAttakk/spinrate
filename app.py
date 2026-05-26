@@ -13,6 +13,10 @@ app = Flask(__name__)
 import logging
 logging.basicConfig(level=logging.DEBUG)
 
+@app.route('/health')
+def health():
+    return 'ok', 200
+
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 DB_PATH = os.path.join(os.path.dirname(__file__), 'db', 'spinrate.db')
 
