@@ -10,7 +10,7 @@
         <img src="{{ album.cover_url }}" alt="{{ album.title }}"
              style="width:180px;height:180px;object-fit:cover;border:1px solid var(--border);box-shadow:4px 4px 0 var(--ink);"
              onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
-        <div style="width:180px;height:180px;background:var(--cream);border:1px solid var(--border);display:none;align-items:center;justify-content:center;font-size:4rem;">🎵</div>
+        <div style="width:180px;height:180px;background:var(--cream);border:1px solid var(--border);display:none;align-items:center;justify-content:center;font-size:4rem;box-shadow:4px 4px 0 var(--ink);">🎵</div>
       {% else %}
         <div style="width:180px;height:180px;background:var(--cream);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:4rem;box-shadow:4px 4px 0 var(--ink);">🎵</div>
       {% endif %}
@@ -61,7 +61,7 @@
 
   <!-- My review banner -->
   {% if my_review %}
-  <div class="card" style="background:var(--cream);border-color:var(--gold);margin-bottom:1.5rem;">
+  <div class="card" style="background:var(--cream);border-color:var(--gold);margin-bottom:1.5rem;" id="review-{{ my_review.id }}">
     <div class="flex justify-between items-center wrap gap2">
       <div>
         <div class="text-mono text-muted" style="font-size:0.7rem;margin-bottom:0.3rem;">Your review</div>
@@ -73,6 +73,40 @@
         <button type="submit" class="btn btn-danger" style="font-size:0.72rem;padding:0.4rem 0.9rem;">Delete</button>
       </form>
     </div>
+
+    <!-- Comments on my review -->
+    {% set my_comments = comments.get(my_review.id, []) %}
+    {% if my_comments %}
+      <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);">
+        {% for c in my_comments %}
+          <div style="display:flex;gap:0.75rem;margin-bottom:0.75rem;align-items:flex-start;">
+            <div class="avatar-circle" style="width:28px;height:28px;font-size:0.75rem;flex-shrink:0;">
+              {{ c.username[0].upper() }}
+            </div>
+            <div style="flex:1;">
+              <div style="font-family:var(--mono);font-size:0.7rem;color:var(--muted);">
+                <a href="/profile/{{ c.username }}" style="color:var(--ink);text-decoration:none;">{{ c.username }}</a>
+                · {{ c.created[:10] }}
+                {% if c.user_id == me.id %}
+                  · <form method="post" action="/delete-comment/{{ c.id }}" style="display:inline;">
+                      <button type="submit" style="background:none;border:none;color:var(--accent);font-family:var(--mono);font-size:0.68rem;cursor:pointer;padding:0;">delete</button>
+                    </form>
+                {% endif %}
+              </div>
+              <p style="font-size:0.85rem;margin-top:0.2rem;">{{ c.body }}</p>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    <!-- Add comment form -->
+    <form method="post" action="/comment/{{ my_review.id }}"
+          style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);display:flex;gap:0.75rem;">
+      <input type="text" name="body" placeholder="Reply to your own review…"
+             style="flex:1;padding:0.5rem 0.75rem;font-size:0.85rem;">
+      <button type="submit" class="btn" style="padding:0.5rem 1rem;font-size:0.72rem;">Reply</button>
+    </form>
   </div>
   {% endif %}
 
@@ -85,7 +119,8 @@
     <div class="feed">
       {% for r in reviews %}
         {% if not my_review or r.id != my_review.id %}
-        <div class="card">
+        <div class="card" id="review-{{ r.id }}">
+          <!-- Review header -->
           <div class="flex justify-between items-center wrap gap2" style="margin-bottom:0.5rem;">
             <div class="flex items-center gap2">
               <div class="avatar-circle" style="width:36px;height:36px;font-size:1rem;">
@@ -101,7 +136,50 @@
             </div>
             <div data-stars="{{ r.rating }}"></div>
           </div>
+
+          <!-- Review body -->
           <p style="font-size:0.875rem;color:#3a3530;">{{ r.body }}</p>
+
+          <!-- Comments on this review -->
+          {% set rev_comments = comments.get(r.id, []) %}
+          {% if rev_comments %}
+            <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);">
+              {% for c in rev_comments %}
+                <div style="display:flex;gap:0.75rem;margin-bottom:0.75rem;align-items:flex-start;">
+                  <div class="avatar-circle" style="width:28px;height:28px;font-size:0.75rem;flex-shrink:0;">
+                    {{ c.username[0].upper() }}
+                  </div>
+                  <div style="flex:1;">
+                    <div style="font-family:var(--mono);font-size:0.7rem;color:var(--muted);">
+                      <a href="/profile/{{ c.username }}" style="color:var(--ink);text-decoration:none;">{{ c.username }}</a>
+                      · {{ c.created[:10] }}
+                      {% if c.user_id == me.id %}
+                        · <form method="post" action="/delete-comment/{{ c.id }}" style="display:inline;">
+                            <button type="submit" style="background:none;border:none;color:var(--accent);font-family:var(--mono);font-size:0.68rem;cursor:pointer;padding:0;">delete</button>
+                          </form>
+                      {% endif %}
+                    </div>
+                    <p style="font-size:0.85rem;margin-top:0.2rem;">{{ c.body }}</p>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          {% endif %}
+
+          <!-- Reply form — collapsed by default, toggled by button -->
+          <div style="margin-top:0.85rem;padding-top:0.85rem;border-top:1px solid var(--border);">
+            <button onclick="toggleReply({{ r.id }})"
+                    style="background:none;border:none;font-family:var(--mono);font-size:0.72rem;color:var(--muted);cursor:pointer;padding:0;letter-spacing:0.05em;">
+              ↩ Reply
+            </button>
+            <form method="post" action="/comment/{{ r.id }}"
+                  id="reply-{{ r.id }}"
+                  style="display:none;margin-top:0.6rem;display:none;gap:0.75rem;flex-direction:row;">
+              <input type="text" name="body" placeholder="Write a reply…"
+                     style="flex:1;padding:0.5rem 0.75rem;font-size:0.85rem;">
+              <button type="submit" class="btn" style="padding:0.5rem 1rem;font-size:0.72rem;">Post</button>
+            </form>
+          </div>
         </div>
         {% endif %}
       {% endfor %}
@@ -114,4 +192,18 @@
   {% endif %}
 
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleReply(reviewId) {
+  const form = document.getElementById('reply-' + reviewId);
+  if (form.style.display === 'none' || form.style.display === '') {
+    form.style.display = 'flex';
+    form.querySelector('input').focus();
+  } else {
+    form.style.display = 'none';
+  }
+}
+</script>
 {% endblock %}

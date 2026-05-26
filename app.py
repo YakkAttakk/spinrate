@@ -129,6 +129,13 @@ def init_db():
                 created   TEXT    DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS')),
                 UNIQUE(user_id, album_id)
             );
+            CREATE TABLE IF NOT EXISTS comments (
+                id         SERIAL PRIMARY KEY,
+                review_id  INTEGER NOT NULL REFERENCES reviews(id) ON DELETE CASCADE,
+                user_id    INTEGER NOT NULL REFERENCES users(id),
+                body       TEXT    NOT NULL,
+                created    TEXT    DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS'))
+            );
         """)
         cur.close()
         conn.close()
@@ -174,6 +181,13 @@ def init_db():
                 body        TEXT    NOT NULL,
                 created     TEXT    DEFAULT (datetime('now')),
                 UNIQUE(user_id, album_id)
+            );
+            CREATE TABLE IF NOT EXISTS comments (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                review_id   INTEGER NOT NULL REFERENCES reviews(id) ON DELETE CASCADE,
+                user_id     INTEGER NOT NULL REFERENCES users(id),
+                body        TEXT    NOT NULL,
+                created     TEXT    DEFAULT (datetime('now'))
             );
         """)
         db.commit()
@@ -489,8 +503,22 @@ def album(album_id):
     my_review = query(
         "SELECT * FROM reviews WHERE user_id=? AND album_id=?",
         (session['user_id'], album_id), one=True)
+    # Fetch all comments for this album's reviews
+    comments_raw = query("""
+        SELECT c.*, u.username
+        FROM comments c JOIN users u ON u.id = c.user_id
+        WHERE c.review_id IN (
+            SELECT id FROM reviews WHERE album_id=?
+        )
+        ORDER BY c.created ASC
+    """, (album_id,))
+    # Group comments by review_id
+    comments = {}
+    for c in comments_raw:
+        comments.setdefault(c['review_id'], []).append(c)
     return render_template('album.html', me=me, album=al,
-                           reviews=reviews, my_review=my_review)
+                           reviews=reviews, my_review=my_review,
+                           comments=comments)
 
 @app.route('/new-review', methods=['GET', 'POST'])
 @login_required
@@ -571,6 +599,30 @@ def members():
         GROUP BY u.id ORDER BY u.username
     """)
     return render_template('members.html', me=me, users=users)
+
+@app.route('/comment/<int:review_id>', methods=['POST'])
+@login_required
+def add_comment(review_id):
+    me   = current_user()
+    body = request.form.get('body', '').strip()
+    if body:
+        rev = query("SELECT album_id FROM reviews WHERE id=?", (review_id,), one=True)
+        if rev:
+            execute("INSERT INTO comments (review_id, user_id, body) VALUES (?,?,?)",
+                    (review_id, me['id'], body))
+            commit()
+            return redirect(url_for('album', album_id=rev['album_id']) + f'#review-{review_id}')
+    return redirect(request.referrer or url_for('home'))
+
+@app.route('/delete-comment/<int:comment_id>', methods=['POST'])
+@login_required
+def delete_comment(comment_id):
+    me  = current_user()
+    c   = query("SELECT * FROM comments WHERE id=?", (comment_id,), one=True)
+    if c and c['user_id'] == me['id']:
+        execute("DELETE FROM comments WHERE id=?", (comment_id,))
+        commit()
+    return redirect(request.referrer or url_for('home'))
 
 # ---------------------------------------------------------------------------
 # Init DB and run
