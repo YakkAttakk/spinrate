@@ -10,6 +10,9 @@ from flask import (Flask, request, redirect, url_for, session,
                    render_template, jsonify, abort, g)
 
 app = Flask(__name__)
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 DB_PATH = os.path.join(os.path.dirname(__file__), 'db', 'spinrate.db')
 
@@ -212,6 +215,7 @@ def api_artist_info():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    app.logger.info("HIT /login")
     error = None
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
