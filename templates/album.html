@@ -40,10 +40,16 @@
       {% endif %}
 
       <div class="flex gap2 mt2 wrap">
-        {% if album.wiki_url %}
-          <a href="{{ album.wiki_url }}" target="_blank" rel="noopener"
+        {% if album.ar_wiki_url %}
+          <a href="{{ album.ar_wiki_url }}" target="_blank" rel="noopener"
              class="badge" style="color:var(--accent);border-color:var(--accent);text-decoration:none;">
             → Artist on Wikipedia
+          </a>
+        {% endif %}
+        {% if album.wiki_url %}
+          <a href="{{ album.wiki_url }}" target="_blank" rel="noopener"
+             class="badge" style="color:var(--gold);border-color:var(--gold);text-decoration:none;">
+            → Album on Wikipedia
           </a>
         {% endif %}
         {% if not my_review %}
@@ -52,8 +58,21 @@
       </div>
 
       {% if album.wiki_summary %}
+        <div style="margin-top:1rem;max-width:520px;">
+          <div style="font-family:var(--mono);font-size:0.68rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:0.35rem;">About this album</div>
+          <p style="font-size:0.85rem;color:#4a4540;border-left:3px solid var(--gold);padding-left:0.85rem;">
+            {{ album.wiki_summary }}
+            {% if album.wiki_url %}
+              <a href="{{ album.wiki_url }}" target="_blank" rel="noopener"
+                 style="color:var(--accent);font-family:var(--mono);font-size:0.72rem;display:inline-block;margin-top:0.3rem;">
+                Read more →
+              </a>
+            {% endif %}
+          </p>
+        </div>
+      {% elif album.ar_wiki_summary %}
         <p style="margin-top:1rem;font-size:0.85rem;color:#4a4540;border-left:3px solid var(--gold);padding-left:0.85rem;max-width:520px;">
-          {{ album.wiki_summary }}
+          {{ album.ar_wiki_summary }}
         </p>
       {% endif %}
     </div>

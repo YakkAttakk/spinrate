@@ -110,14 +110,16 @@ def init_db():
                 created      TEXT   DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS'))
             );
             CREATE TABLE IF NOT EXISTS albums (
-                id        SERIAL PRIMARY KEY,
-                artist_id INTEGER NOT NULL REFERENCES artists(id),
-                title     TEXT    NOT NULL,
-                mb_id     TEXT,
-                year      TEXT,
-                cover_url TEXT,
-                genre     TEXT,
-                created   TEXT    DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS')),
+                id           SERIAL PRIMARY KEY,
+                artist_id    INTEGER NOT NULL REFERENCES artists(id),
+                title        TEXT    NOT NULL,
+                mb_id        TEXT,
+                year         TEXT,
+                cover_url    TEXT,
+                genre        TEXT,
+                wiki_url     TEXT,
+                wiki_summary TEXT,
+                created      TEXT    DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS')),
                 UNIQUE(artist_id, title)
             );
             CREATE TABLE IF NOT EXISTS reviews (
@@ -170,6 +172,8 @@ def init_db():
                 year        TEXT,
                 cover_url   TEXT,
                 genre       TEXT,
+                wiki_url    TEXT,
+                wiki_summary TEXT,
                 created     TEXT    DEFAULT (datetime('now')),
                 UNIQUE(artist_id, title)
             );
@@ -317,6 +321,62 @@ def wikipedia_info(artist_name):
 
     return None, None
 
+
+def album_wikipedia_info(artist_name, album_title):
+    """Search Wikipedia for a specific album and return its URL + summary."""
+    music_words = ['album', 'record', 'ep', 'lp', 'studio', 'soundtrack',
+                   'compilation', 'single', 'release', 'discography']
+
+    def fetch_summary(title):
+        try:
+            encoded = urllib.parse.quote(title.replace(' ', '_'))
+            req = urllib.request.Request(
+                f"https://en.wikipedia.org/api/rest_v1/page/summary/{encoded}",
+                headers=HEADERS)
+            with urllib.request.urlopen(req, timeout=6) as r:
+                return json.loads(r.read())
+        except Exception:
+            return None
+
+    def is_album_page(data):
+        if not data or data.get('type') == 'disambiguation':
+            return False
+        description = data.get('description', '').lower()
+        extract     = data.get('extract', '').lower()[:400]
+        return any(w in description or w in extract for w in music_words)
+
+    def extract_result(data):
+        summary = data.get('extract', '')
+        if len(summary) > 400:
+            summary = summary[:400].rsplit(' ', 1)[0] + '…'
+        wiki_url = data.get('content_urls', {}).get('desktop', {}).get('page')
+        return wiki_url, summary
+
+    # Search Wikipedia for the album with artist name for disambiguation
+    for search_term in [
+        f"{album_title} {artist_name} album",
+        f"{album_title} album",
+        f"{album_title} {artist_name}",
+    ]:
+        try:
+            qs = urllib.parse.urlencode({
+                'action': 'query', 'list': 'search',
+                'srsearch': search_term, 'srlimit': 5,
+                'format': 'json'
+            })
+            req = urllib.request.Request(
+                f"https://en.wikipedia.org/w/api.php?{qs}", headers=HEADERS)
+            with urllib.request.urlopen(req, timeout=6) as r:
+                results = json.loads(r.read())
+            for hit in results.get('query', {}).get('search', []):
+                page_title = hit.get('title', '')
+                data = fetch_summary(page_title)
+                if is_album_page(data):
+                    return extract_result(data)
+        except Exception:
+            continue
+
+    return None, None
 
 # ---------------------------------------------------------------------------
 # API routes
@@ -488,12 +548,31 @@ def album(album_id):
     me = current_user()
     al = query("""
         SELECT al.*, ar.name as artist_name, ar.id as artist_id,
-               ar.wiki_url, ar.wiki_summary
+               ar.wiki_url as ar_wiki_url, ar.wiki_summary as ar_wiki_summary
         FROM albums al JOIN artists ar ON ar.id = al.artist_id
         WHERE al.id = ?
     """, (album_id,), one=True)
     if not al:
         abort(404)
+
+    # Lazily fetch and cache album Wikipedia info on first visit
+    if not al['wiki_url'] and not al['wiki_summary']:
+        try:
+            awiki_url, awiki_summary = album_wikipedia_info(al['artist_name'], al['title'])
+            if awiki_url or awiki_summary:
+                execute("UPDATE albums SET wiki_url=?, wiki_summary=? WHERE id=?",
+                        (awiki_url, awiki_summary, album_id))
+                commit()
+                # Re-fetch album with updated wiki info
+                al = query("""
+                    SELECT al.*, ar.name as artist_name, ar.id as artist_id,
+                           ar.wiki_url as ar_wiki_url, ar.wiki_summary as ar_wiki_summary
+                    FROM albums al JOIN artists ar ON ar.id = al.artist_id
+                    WHERE al.id = ?
+                """, (album_id,), one=True)
+        except Exception:
+            pass
+
     reviews   = query("""
         SELECT r.*, u.username
         FROM reviews r JOIN users u ON u.id = r.user_id
