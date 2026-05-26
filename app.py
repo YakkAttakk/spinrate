@@ -428,7 +428,12 @@ def members():
 # ---------------------------------------------------------------------------
 
 # Initialise DB on startup (runs whether gunicorn or direct)
-init_db()
+try:
+    init_db()
+    print("Database initialised successfully")
+except Exception as e:
+    print(f"DATABASE INIT ERROR: {e}")
+    raise
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001, debug=False)
