@@ -5,94 +5,179 @@ import secrets
 import json
 import urllib.request
 import urllib.parse
-from datetime import datetime
 from flask import (Flask, request, redirect, url_for, session,
                    render_template, jsonify, abort, g)
 
 app = Flask(__name__)
-import logging
-logging.basicConfig(level=logging.DEBUG)
-
-@app.route('/health')
-def health():
-    return 'ok', 200
-
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
+
+DATABASE_URL = os.environ.get('DATABASE_URL', '')
+USING_PG = DATABASE_URL.startswith('postgres')
 DB_PATH = os.path.join(os.path.dirname(__file__), 'db', 'spinrate.db')
 
 # ---------------------------------------------------------------------------
-# Database helpers
+# Database abstraction — SQLite locally, Postgres on Railway
 # ---------------------------------------------------------------------------
-
-@app.route('/debug')
-def debug():
-    import os
-    db_url = os.environ.get('DATABASE_URL', 'NOT SET')
-    return f'DATABASE_URL starts with: {db_url[:30]}... | USING_PG: {USING_PG}'
 
 def get_db():
     if 'db' not in g:
-        g.db = sqlite3.connect(DB_PATH, detect_types=sqlite3.PARSE_DECLTYPES)
-        g.db.row_factory = sqlite3.Row
-        g.db.execute("PRAGMA journal_mode=WAL")
-        g.db.execute("PRAGMA foreign_keys=ON")
+        if USING_PG:
+            import psycopg2
+            import psycopg2.extras
+            url = DATABASE_URL
+            if url.startswith('postgres://'):
+                url = url.replace('postgres://', 'postgresql://', 1)
+            conn = psycopg2.connect(url)
+            conn.autocommit = False
+            g.db = conn
+            g.db_pg = True
+        else:
+            g.db = sqlite3.connect(DB_PATH, detect_types=sqlite3.PARSE_DECLTYPES)
+            g.db.row_factory = sqlite3.Row
+            g.db.execute("PRAGMA journal_mode=WAL")
+            g.db.execute("PRAGMA foreign_keys=ON")
+            g.db_pg = False
     return g.db
+
+def query(sql, params=(), one=False):
+    """Run a SELECT and return Row-like dicts."""
+    db = get_db()
+    if g.get('db_pg'):
+        import psycopg2.extras
+        # Postgres uses %s placeholders; replace ? with %s
+        sql = sql.replace('?', '%s')
+        with db.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+        return rows[0] if (one and rows) else (None if one else rows)
+    else:
+        cur = db.execute(sql, params)
+        rows = cur.fetchall()
+        return rows[0] if (one and rows) else (None if one else rows)
+
+def execute(sql, params=()):
+    """Run INSERT/UPDATE/DELETE, return lastrowid."""
+    db = get_db()
+    if g.get('db_pg'):
+        # Use RETURNING id for INSERT to get lastrowid
+        sql = sql.replace('?', '%s')
+        if sql.strip().upper().startswith('INSERT') and 'RETURNING' not in sql.upper():
+            sql = sql.rstrip('; ') + ' RETURNING id'
+        with db.cursor() as cur:
+            cur.execute(sql, params)
+            if sql.strip().upper().startswith('INSERT') and 'RETURNING' in sql.upper():
+                row = cur.fetchone()
+                return row[0] if row else None
+            return None
+    else:
+        cur = db.execute(sql, params)
+        return cur.lastrowid
+
+def commit():
+    get_db().commit()
 
 @app.teardown_appcontext
 def close_db(exc):
     db = g.pop('db', None)
     if db:
+        if exc:
+            try: db.rollback()
+            except Exception: pass
         db.close()
 
 def init_db():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    db = sqlite3.connect(DB_PATH)
-    db.executescript("""
-        PRAGMA foreign_keys = ON;
-
-        CREATE TABLE IF NOT EXISTS users (
-            id        INTEGER PRIMARY KEY AUTOINCREMENT,
-            username  TEXT    NOT NULL UNIQUE COLLATE NOCASE,
-            password  TEXT    NOT NULL,
-            bio       TEXT    DEFAULT '',
-            avatar    TEXT    DEFAULT '',
-            created   TEXT    DEFAULT (datetime('now'))
-        );
-
-        CREATE TABLE IF NOT EXISTS artists (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            name        TEXT    NOT NULL UNIQUE COLLATE NOCASE,
-            mb_id       TEXT,
-            wiki_url    TEXT,
-            wiki_summary TEXT,
-            image_url   TEXT,
-            created     TEXT    DEFAULT (datetime('now'))
-        );
-
-        CREATE TABLE IF NOT EXISTS albums (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            artist_id   INTEGER NOT NULL REFERENCES artists(id),
-            title       TEXT    NOT NULL,
-            mb_id       TEXT,
-            year        TEXT,
-            cover_url   TEXT,
-            genre       TEXT,
-            created     TEXT    DEFAULT (datetime('now')),
-            UNIQUE(artist_id, title)
-        );
-
-        CREATE TABLE IF NOT EXISTS reviews (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id     INTEGER NOT NULL REFERENCES users(id),
-            album_id    INTEGER NOT NULL REFERENCES albums(id),
-            rating      INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
-            body        TEXT    NOT NULL,
-            created     TEXT    DEFAULT (datetime('now')),
-            UNIQUE(user_id, album_id)
-        );
-    """)
-    db.commit()
-    db.close()
+    if USING_PG:
+        import psycopg2
+        url = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+        conn = psycopg2.connect(url)
+        conn.autocommit = True
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id        SERIAL PRIMARY KEY,
+                username  TEXT   NOT NULL UNIQUE,
+                password  TEXT   NOT NULL,
+                bio       TEXT   DEFAULT '',
+                avatar    TEXT   DEFAULT '',
+                created   TEXT   DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS'))
+            );
+            CREATE TABLE IF NOT EXISTS artists (
+                id           SERIAL PRIMARY KEY,
+                name         TEXT   NOT NULL UNIQUE,
+                mb_id        TEXT,
+                wiki_url     TEXT,
+                wiki_summary TEXT,
+                image_url    TEXT,
+                created      TEXT   DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS'))
+            );
+            CREATE TABLE IF NOT EXISTS albums (
+                id        SERIAL PRIMARY KEY,
+                artist_id INTEGER NOT NULL REFERENCES artists(id),
+                title     TEXT    NOT NULL,
+                mb_id     TEXT,
+                year      TEXT,
+                cover_url TEXT,
+                genre     TEXT,
+                created   TEXT    DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS')),
+                UNIQUE(artist_id, title)
+            );
+            CREATE TABLE IF NOT EXISTS reviews (
+                id        SERIAL PRIMARY KEY,
+                user_id   INTEGER NOT NULL REFERENCES users(id),
+                album_id  INTEGER NOT NULL REFERENCES albums(id),
+                rating    INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
+                body      TEXT    NOT NULL,
+                created   TEXT    DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS')),
+                UNIQUE(user_id, album_id)
+            );
+        """)
+        cur.close()
+        conn.close()
+    else:
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+        db = sqlite3.connect(DB_PATH)
+        db.executescript("""
+            PRAGMA foreign_keys = ON;
+            CREATE TABLE IF NOT EXISTS users (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                username  TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+                password  TEXT    NOT NULL,
+                bio       TEXT    DEFAULT '',
+                avatar    TEXT    DEFAULT '',
+                created   TEXT    DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS artists (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                name        TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+                mb_id       TEXT,
+                wiki_url    TEXT,
+                wiki_summary TEXT,
+                image_url   TEXT,
+                created     TEXT    DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS albums (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                artist_id   INTEGER NOT NULL REFERENCES artists(id),
+                title       TEXT    NOT NULL,
+                mb_id       TEXT,
+                year        TEXT,
+                cover_url   TEXT,
+                genre       TEXT,
+                created     TEXT    DEFAULT (datetime('now')),
+                UNIQUE(artist_id, title)
+            );
+            CREATE TABLE IF NOT EXISTS reviews (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     INTEGER NOT NULL REFERENCES users(id),
+                album_id    INTEGER NOT NULL REFERENCES albums(id),
+                rating      INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
+                body        TEXT    NOT NULL,
+                created     TEXT    DEFAULT (datetime('now')),
+                UNIQUE(user_id, album_id)
+            );
+        """)
+        db.commit()
+        db.close()
 
 # ---------------------------------------------------------------------------
 # Auth helpers
@@ -105,7 +190,7 @@ def current_user():
     uid = session.get('user_id')
     if not uid:
         return None
-    return get_db().execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    return query("SELECT * FROM users WHERE id=?", (uid,), one=True)
 
 def login_required(f):
     from functools import wraps
@@ -117,15 +202,15 @@ def login_required(f):
     return decorated
 
 # ---------------------------------------------------------------------------
-# MusicBrainz + Cover Art helpers
+# MusicBrainz + Cover Art + Wikipedia helpers
 # ---------------------------------------------------------------------------
 
-MB_BASE = "https://musicbrainz.org/ws/2"
+MB_BASE  = "https://musicbrainz.org/ws/2"
 CAA_BASE = "https://coverartarchive.org"
-HEADERS = {'User-Agent': 'SpinRate/1.0 (music-social-app)'}
+HEADERS  = {'User-Agent': 'SpinRate/1.0 (music-social-app)'}
 
 def mb_get(path, params=None):
-    qs = urllib.parse.urlencode({**(params or {}), 'fmt': 'json'})
+    qs  = urllib.parse.urlencode({**(params or {}), 'fmt': 'json'})
     url = f"{MB_BASE}/{path}?{qs}"
     try:
         req = urllib.request.Request(url, headers=HEADERS)
@@ -137,64 +222,23 @@ def mb_get(path, params=None):
 def cover_art_url(mb_id):
     if not mb_id:
         return None
-    url = f"{CAA_BASE}/release/{mb_id}"
     try:
-        req = urllib.request.Request(url, headers=HEADERS)
+        req = urllib.request.Request(f"{CAA_BASE}/release/{mb_id}", headers=HEADERS)
         with urllib.request.urlopen(req, timeout=6) as r:
             data = json.loads(r.read())
         images = data.get('images', [])
         for img in images:
             if img.get('front'):
-                thumbs = img.get('thumbnails', {})
-                return thumbs.get('500') or thumbs.get('large') or img.get('image')
+                t = img.get('thumbnails', {})
+                return t.get('500') or t.get('large') or img.get('image')
         if images:
-            thumbs = images[0].get('thumbnails', {})
-            return thumbs.get('500') or thumbs.get('large') or images[0].get('image')
+            t = images[0].get('thumbnails', {})
+            return t.get('500') or t.get('large') or images[0].get('image')
     except Exception:
         pass
     return None
 
-def mb_artist_wiki(artist_name):
-    """Ask MusicBrainz for the artist's Wikipedia URL directly."""
-    data = mb_get('artist', {'query': f'artist:"{artist_name}"', 'limit': 1})
-    if not data or not data.get('artists'):
-        return None
-    artist = data['artists'][0]
-    mb_artist_id = artist.get('id')
-    if not mb_artist_id:
-        return None
-    # Fetch full artist record with URL relations
-    detail = mb_get(f'artist/{mb_artist_id}', {'inc': 'url-rels'})
-    if not detail:
-        return None
-    for rel in detail.get('relations', []):
-        url = rel.get('url', {}).get('resource', '')
-        if 'wikipedia.org' in url:
-            return url
-    return None
-
 def wikipedia_info(artist_name):
-    """Get Wikipedia summary, using MusicBrainz to find the exact article."""
-    # First try to get the exact Wikipedia URL from MusicBrainz
-    wiki_url = mb_artist_wiki(artist_name)
-    
-    if wiki_url:
-        # Extract the page title from the URL and fetch the summary
-        try:
-            title = wiki_url.rstrip('/').split('/')[-1]
-            req = urllib.request.Request(
-                f"https://en.wikipedia.org/api/rest_v1/page/summary/{title}",
-                headers=HEADERS)
-            with urllib.request.urlopen(req, timeout=6) as r:
-                data = json.loads(r.read())
-            summary = data.get('extract', '')
-            if len(summary) > 400:
-                summary = summary[:400].rsplit(' ', 1)[0] + '…'
-            return wiki_url, summary
-        except Exception:
-            return wiki_url, None
-    
-    # Fall back to name search (less reliable)
     title = urllib.parse.quote(artist_name.replace(' ', '_'))
     try:
         req = urllib.request.Request(
@@ -203,13 +247,6 @@ def wikipedia_info(artist_name):
         with urllib.request.urlopen(req, timeout=6) as r:
             data = json.loads(r.read())
         if data.get('type') == 'disambiguation':
-            return None, None
-        # Sanity check — make sure it's actually about a musician/band
-        categories = data.get('description', '').lower()
-        extract = data.get('extract', '').lower()
-        music_words = ['band', 'music', 'singer', 'rapper', 'musician', 
-                       'album', 'record', 'rock', 'jazz', 'pop', 'artist']
-        if not any(w in categories or w in extract[:200] for w in music_words):
             return None, None
         summary = data.get('extract', '')
         if len(summary) > 400:
@@ -220,33 +257,33 @@ def wikipedia_info(artist_name):
         return None, None
 
 # ---------------------------------------------------------------------------
-# API: album/artist search (called from JS)
+# API routes
 # ---------------------------------------------------------------------------
 
 @app.route('/api/search-album')
 @login_required
 def api_search_album():
-    q = request.args.get('q', '').strip()
+    q        = request.args.get('q', '').strip()
     artist_q = request.args.get('artist', '').strip()
     if not q:
         return jsonify([])
-    query = f'"{q}"' if artist_q else q
+    query_str = f'"{q}"' if artist_q else q
     if artist_q:
-        query += f' AND artist:"{artist_q}"'
-    data = mb_get('release', {'query': query, 'limit': 8})
+        query_str += f' AND artist:"{artist_q}"'
+    data = mb_get('release', {'query': query_str, 'limit': 8})
     if not data:
         return jsonify([])
     results = []
     for rel in data.get('releases', []):
-        mb_id = rel.get('id')
+        mb_id  = rel.get('id')
         artist = ''
         if rel.get('artist-credit'):
             artist = rel['artist-credit'][0].get('artist', {}).get('name', '')
         results.append({
-            'mb_id': mb_id,
-            'title': rel.get('title', ''),
-            'artist': artist,
-            'year': (rel.get('date') or '')[:4],
+            'mb_id':     mb_id,
+            'title':     rel.get('title', ''),
+            'artist':    artist,
+            'year':      (rel.get('date') or '')[:4],
             'cover_url': f'/api/cover/{mb_id}' if mb_id else None,
         })
     return jsonify(results)
@@ -256,7 +293,7 @@ def api_cover(mb_id):
     url = cover_art_url(mb_id)
     if url:
         return redirect(url)
-    return redirect('/static/no-cover.svg')
+    return ('', 204)
 
 @app.route('/api/artist-info')
 @login_required
@@ -273,14 +310,12 @@ def api_artist_info():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    app.logger.info("HIT /login")
     error = None
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
-        db = get_db()
-        user = db.execute(
-            "SELECT * FROM users WHERE username=?", (username,)).fetchone()
+        user = query("SELECT * FROM users WHERE LOWER(username)=LOWER(?)",
+                     (username,), one=True)
         if user and user['password'] == hash_pw(password):
             session['user_id'] = user['id']
             return redirect(request.args.get('next') or url_for('home'))
@@ -293,23 +328,24 @@ def register():
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
-        bio = request.form.get('bio', '').strip()
+        bio      = request.form.get('bio', '').strip()
         if not username or not password:
             error = 'Username and password are required.'
         elif len(password) < 4:
             error = 'Password must be at least 4 characters.'
         else:
             try:
-                get_db().execute(
-                    "INSERT INTO users (username, password, bio) VALUES (?,?,?)",
-                    (username, hash_pw(password), bio))
-                get_db().commit()
-                user = get_db().execute(
-                    "SELECT * FROM users WHERE username=?", (username,)).fetchone()
+                execute("INSERT INTO users (username, password, bio) VALUES (?,?,?)",
+                        (username, hash_pw(password), bio))
+                commit()
+                user = query("SELECT * FROM users WHERE LOWER(username)=LOWER(?)",
+                             (username,), one=True)
                 session['user_id'] = user['id']
                 return redirect(url_for('home'))
-            except sqlite3.IntegrityError:
+            except Exception as e:
                 error = 'That username is already taken.'
+                try: get_db().rollback()
+                except Exception: pass
     return render_template('register.html', error=error)
 
 @app.route('/logout')
@@ -324,142 +360,147 @@ def logout():
 @app.route('/')
 @login_required
 def home():
-    db = get_db()
-    me = current_user()
-    # Recent reviews from all users
-    reviews = db.execute("""
+    me      = current_user()
+    reviews = query("""
         SELECT r.*, u.username, al.title as album_title, al.cover_url, al.year,
                ar.name as artist_name, ar.id as artist_id, al.id as album_id
         FROM reviews r
-        JOIN users u ON u.id = r.user_id
+        JOIN users u   ON u.id  = r.user_id
         JOIN albums al ON al.id = r.album_id
         JOIN artists ar ON ar.id = al.artist_id
         ORDER BY r.created DESC LIMIT 20
-    """).fetchall()
+    """)
     return render_template('home.html', me=me, reviews=reviews)
 
 @app.route('/profile/<username>')
 @login_required
 def profile(username):
-    db = get_db()
-    me = current_user()
-    user = db.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
+    me   = current_user()
+    user = query("SELECT * FROM users WHERE LOWER(username)=LOWER(?)",
+                 (username,), one=True)
     if not user:
         abort(404)
-    reviews = db.execute("""
+    reviews = query("""
         SELECT r.*, al.title as album_title, al.cover_url, al.year,
                ar.name as artist_name, ar.id as artist_id, al.id as album_id
         FROM reviews r
-        JOIN albums al ON al.id = r.album_id
+        JOIN albums al  ON al.id = r.album_id
         JOIN artists ar ON ar.id = al.artist_id
         WHERE r.user_id = ?
         ORDER BY r.created DESC
-    """, (user['id'],)).fetchall()
+    """, (user['id'],))
     return render_template('profile.html', me=me, user=user, reviews=reviews)
 
 @app.route('/artist/<int:artist_id>')
 @login_required
 def artist(artist_id):
-    db = get_db()
     me = current_user()
-    a = db.execute("SELECT * FROM artists WHERE id=?", (artist_id,)).fetchone()
+    a  = query("SELECT * FROM artists WHERE id=?", (artist_id,), one=True)
     if not a:
         abort(404)
-    albums = db.execute("""
+    albums = query("""
         SELECT al.*,
-               COUNT(r.id) as review_count,
+               COUNT(r.id)        as review_count,
+               ROUND(AVG(r.rating::numeric), 1) as avg_rating
+        FROM albums al
+        LEFT JOIN reviews r ON r.album_id = al.id
+        WHERE al.artist_id = ?
+        GROUP BY al.id
+        ORDER BY al.year DESC
+    """ if USING_PG else """
+        SELECT al.*,
+               COUNT(r.id)        as review_count,
                ROUND(AVG(r.rating), 1) as avg_rating
         FROM albums al
         LEFT JOIN reviews r ON r.album_id = al.id
         WHERE al.artist_id = ?
         GROUP BY al.id
         ORDER BY al.year DESC
-    """, (artist_id,)).fetchall()
+    """, (artist_id,))
     return render_template('artist.html', me=me, artist=a, albums=albums)
 
 @app.route('/album/<int:album_id>')
 @login_required
 def album(album_id):
-    db = get_db()
     me = current_user()
-    al = db.execute("""
+    al = query("""
         SELECT al.*, ar.name as artist_name, ar.id as artist_id,
                ar.wiki_url, ar.wiki_summary
         FROM albums al JOIN artists ar ON ar.id = al.artist_id
         WHERE al.id = ?
-    """, (album_id,)).fetchone()
+    """, (album_id,), one=True)
     if not al:
         abort(404)
-    reviews = db.execute("""
+    reviews   = query("""
         SELECT r.*, u.username
         FROM reviews r JOIN users u ON u.id = r.user_id
         WHERE r.album_id = ?
         ORDER BY r.created DESC
-    """, (album_id,)).fetchall()
-    my_review = db.execute(
+    """, (album_id,))
+    my_review = query(
         "SELECT * FROM reviews WHERE user_id=? AND album_id=?",
-        (me['id'], album_id)).fetchone()
+        (session['user_id'], album_id), one=True)
     return render_template('album.html', me=me, album=al,
                            reviews=reviews, my_review=my_review)
 
 @app.route('/new-review', methods=['GET', 'POST'])
 @login_required
 def new_review():
-    db = get_db()
-    me = current_user()
+    me    = current_user()
     error = None
     if request.method == 'POST':
-        artist_name = request.form.get('artist_name', '').strip()
-        album_title = request.form.get('album_title', '').strip()
-        mb_id       = request.form.get('mb_id', '').strip()
-        year        = request.form.get('year', '').strip()
-        cover_url   = request.form.get('cover_url', '').strip()
-        wiki_url    = request.form.get('wiki_url', '').strip()
-        wiki_summary= request.form.get('wiki_summary', '').strip()
-        rating      = request.form.get('rating', '').strip()
-        body        = request.form.get('body', '').strip()
+        artist_name  = request.form.get('artist_name',  '').strip()
+        album_title  = request.form.get('album_title',  '').strip()
+        mb_id        = request.form.get('mb_id',        '').strip()
+        year         = request.form.get('year',         '').strip()
+        cover_url    = request.form.get('cover_url',    '').strip()
+        wiki_url     = request.form.get('wiki_url',     '').strip()
+        wiki_summary = request.form.get('wiki_summary', '').strip()
+        rating       = request.form.get('rating',       '').strip()
+        body         = request.form.get('body',         '').strip()
 
         if not all([artist_name, album_title, rating, body]):
             error = 'Artist, album, rating, and review text are required.'
         else:
             rating = int(rating)
             # Upsert artist
-            existing = db.execute(
-                "SELECT id FROM artists WHERE name=?", (artist_name,)).fetchone()
+            existing = query(
+                "SELECT id FROM artists WHERE LOWER(name)=LOWER(?)",
+                (artist_name,), one=True)
             if existing:
                 artist_id = existing['id']
                 if wiki_url:
-                    db.execute(
-                        "UPDATE artists SET wiki_url=?, wiki_summary=? WHERE id=?",
-                        (wiki_url, wiki_summary, artist_id))
+                    execute("UPDATE artists SET wiki_url=?, wiki_summary=? WHERE id=?",
+                            (wiki_url, wiki_summary, artist_id))
             else:
-                cur = db.execute(
+                artist_id = execute(
                     "INSERT INTO artists (name, wiki_url, wiki_summary) VALUES (?,?,?)",
                     (artist_name, wiki_url or None, wiki_summary or None))
-                artist_id = cur.lastrowid
 
             # Upsert album
-            existing_al = db.execute(
-                "SELECT id FROM albums WHERE artist_id=? AND title=?",
-                (artist_id, album_title)).fetchone()
+            existing_al = query(
+                "SELECT id FROM albums WHERE artist_id=? AND LOWER(title)=LOWER(?)",
+                (artist_id, album_title), one=True)
             if existing_al:
                 album_id = existing_al['id']
             else:
-                cur = db.execute(
+                album_id = execute(
                     "INSERT INTO albums (artist_id, title, mb_id, year, cover_url) VALUES (?,?,?,?,?)",
                     (artist_id, album_title, mb_id or None, year or None, cover_url or None))
-                album_id = cur.lastrowid
 
-            # Insert or replace review
-            try:
-                db.execute(
-                    "INSERT INTO reviews (user_id, album_id, rating, body) VALUES (?,?,?,?)",
-                    (me['id'], album_id, rating, body))
-            except sqlite3.IntegrityError:
-                db.execute(
-                    "UPDATE reviews SET rating=?, body=?, created=datetime('now') WHERE user_id=? AND album_id=?",
-                    (rating, body, me['id'], album_id))
-            db.commit()
+            # Insert or update review
+            existing_rev = query(
+                "SELECT id FROM reviews WHERE user_id=? AND album_id=?",
+                (me['id'], album_id), one=True)
+            if existing_rev:
+                execute("UPDATE reviews SET rating=?, body=?, created=? WHERE id=?",
+                        (rating, body,
+                         __import__('datetime').datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+                         existing_rev['id']))
+            else:
+                execute("INSERT INTO reviews (user_id, album_id, rating, body) VALUES (?,?,?,?)",
+                        (me['id'], album_id, rating, body))
+            commit()
             return redirect(url_for('album', album_id=album_id))
 
     return render_template('new_review.html', me=me, error=error)
@@ -467,36 +508,26 @@ def new_review():
 @app.route('/delete-review/<int:review_id>', methods=['POST'])
 @login_required
 def delete_review(review_id):
-    db = get_db()
-    me = current_user()
-    rev = db.execute("SELECT * FROM reviews WHERE id=?", (review_id,)).fetchone()
+    me  = current_user()
+    rev = query("SELECT * FROM reviews WHERE id=?", (review_id,), one=True)
     if rev and rev['user_id'] == me['id']:
-        db.execute("DELETE FROM reviews WHERE id=?", (review_id,))
-        db.commit()
+        execute("DELETE FROM reviews WHERE id=?", (review_id,))
+        commit()
     return redirect(request.referrer or url_for('home'))
 
 @app.route('/members')
 @login_required
 def members():
-    db = get_db()
-    me = current_user()
-    users = db.execute("""
+    me    = current_user()
+    users = query("""
         SELECT u.*, COUNT(r.id) as review_count
         FROM users u LEFT JOIN reviews r ON r.user_id = u.id
         GROUP BY u.id ORDER BY u.username
-    """).fetchall()
+    """)
     return render_template('members.html', me=me, users=users)
 
 # ---------------------------------------------------------------------------
 
-# Initialise DB on startup (runs whether gunicorn or direct)
-try:
-    init_db()
-    print("Database initialised successfully")
-except Exception as e:
-    print(f"DATABASE INIT ERROR: {e}")
-    raise
-
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5001))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    init_db()
+    app.run(host='0.0.0.0', port=5001, debug=False)
