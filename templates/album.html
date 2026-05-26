@@ -126,17 +126,33 @@
     {% if reception.reviews %}
     <div style="overflow-x:auto;">
       <table style="border-collapse:collapse;width:100%;font-size:0.82rem;">
-        <thead>
-          <tr style="border-bottom:2px solid var(--border);">
-            <th style="text-align:left;padding:0.3rem 1rem 0.3rem 0;font-family:var(--mono);font-size:0.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.07em;font-weight:normal;">Publication</th>
-            <th style="text-align:left;padding:0.3rem 0;font-family:var(--mono);font-size:0.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.07em;font-weight:normal;">Score</th>
-          </tr>
-        </thead>
         <tbody>
           {% for r in reception.reviews %}
           <tr style="border-bottom:1px solid var(--border);">
-            <td style="padding:0.35rem 1rem 0.35rem 0;color:#3a3530;white-space:nowrap;">{{ r.publication }}</td>
-            <td style="padding:0.35rem 0;font-family:var(--mono);color:var(--accent);font-weight:500;">{{ r.score }}</td>
+            <td style="padding:0.4rem 1.25rem 0.4rem 0;color:#3a3530;white-space:nowrap;">
+              {% if r.url %}
+                <a href="{{ r.url }}" target="_blank" rel="noopener"
+                   style="color:var(--ink);text-decoration:none;border-bottom:1px solid var(--border);">
+                  {{ r.publication }}
+                </a>
+              {% else %}
+                {{ r.publication }}
+              {% endif %}
+            </td>
+            <td style="padding:0.4rem 0.75rem 0.4rem 0;font-family:var(--mono);font-size:0.78rem;color:var(--muted);white-space:nowrap;">
+              {{ r.score_display }}
+            </td>
+            <td style="padding:0.4rem 0;">
+              {% if r.score_normalized %}
+                {% set filled = (r.score_normalized | round) | int %}
+                {% for i in range(1, 6) %}
+                  <span style="color:{% if i <= filled %}var(--gold){% else %}var(--border){% endif %};font-size:0.85rem;">★</span>
+                {% endfor %}
+                <span style="font-family:var(--mono);font-size:0.68rem;color:var(--muted);margin-left:0.25rem;">
+                  {{ "%.1f"|format(r.score_normalized) }}/5
+                </span>
+              {% endif %}
+            </td>
           </tr>
           {% endfor %}
         </tbody>

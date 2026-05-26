@@ -584,12 +584,13 @@ def fetch_infobox(wiki_url):
 def fetch_critical_reception(wiki_url):
     """Extract critical reception data from a Wikipedia album page.
 
-    Returns a JSON string with:
+    Returns a JSON string:
       {
-        "reviews": [{"publication": str, "score": str}, ...],
-        "summary": str   # prose from the reception section
+        "reviews": [{"publication": str, "url": str|null, "score_raw": str,
+                     "score_normalized": float|null, "score_display": str}, ...],
+        "summary": str
       }
-    Or None if nothing found.
+    Or None if nothing useful found.
     """
     if not wiki_url:
         return None
@@ -599,7 +600,6 @@ def fetch_critical_reception(wiki_url):
 
         title = wiki_url.rstrip('/').split('/wiki/')[-1]
 
-        # Fetch full page HTML (all sections)
         qs = urllib.parse.urlencode({
             'action': 'parse', 'page': urllib.parse.unquote(title),
             'prop': 'text', 'format': 'json',
@@ -615,8 +615,65 @@ def fetch_critical_reception(wiki_url):
             return None
 
         # ----------------------------------------------------------------
-        # Step 1: Extract review score table (wikitable inside reception)
-        # Wikipedia encodes these as a table with columns Publication | Score
+        # Score normalisation — convert any score format to x/5
+        # ----------------------------------------------------------------
+        def normalize_score(raw):
+            """Return (normalized_float, display_str) or (None, raw)."""
+            raw = raw.strip()
+
+            # Strip trailing % sign for percentage scores
+            if raw.endswith('%'):
+                try:
+                    pct = float(raw[:-1])
+                    return round(pct / 20, 2), f"{pct:.0f}%"
+                except ValueError:
+                    pass
+
+            # Letter grades: A+/A/A- B+/B/B- etc (Christgau, Entertainment Weekly)
+            grade_map = {
+                'A+': 5.0, 'A': 4.8, 'A-': 4.5,
+                'B+': 4.2, 'B': 4.0, 'B-': 3.7,
+                'C+': 3.3, 'C': 3.0, 'C-': 2.7,
+                'D+': 2.3, 'D': 2.0, 'D-': 1.7,
+                'F': 1.0,
+            }
+            upper = raw.upper().strip()
+            if upper in grade_map:
+                return grade_map[upper], raw
+
+            # X/Y fraction (e.g. 4/5, 8/10, 7.5/10, 4.5/5)
+            m = re.match(r'^(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)$', raw)
+            if m:
+                num, denom = float(m.group(1)), float(m.group(2))
+                if denom > 0:
+                    return round(num / denom * 5, 2), raw
+
+            # Plain number out of 100 (Metacritic style: "78")
+            m = re.match(r'^(\d{2,3})$', raw)
+            if m:
+                val = int(m.group(1))
+                if 0 <= val <= 100:
+                    return round(val / 20, 2), f"{val}/100"
+
+            # Star count: "★★★★☆" or "4 stars" or "4.5 stars"
+            star_match = re.match(r'^([\d.]+)\s*(?:star|stars|★)', raw, re.I)
+            if star_match:
+                stars = float(star_match.group(1))
+                total_m = re.search(r'(?:out of|/)\s*(\d)', raw, re.I)
+                total = float(total_m.group(1)) if total_m else 5.0
+                return round(stars / total * 5, 2), raw
+
+            # Count filled stars (★) vs total (★+☆)
+            if '★' in raw or '☆' in raw:
+                filled = raw.count('★')
+                total  = raw.count('★') + raw.count('☆')
+                if total > 0:
+                    return round(filled / total * 5, 2), f"{filled}/{total} stars"
+
+            return None, raw
+
+        # ----------------------------------------------------------------
+        # HTML parser
         # ----------------------------------------------------------------
         class ReceptionParser(HTMLParser):
             def __init__(self):
@@ -624,65 +681,111 @@ def fetch_critical_reception(wiki_url):
                 self.reviews = []
                 self.summary_paragraphs = []
 
-                # State for finding the reception section
-                self.in_reception = False
-                self.reception_keywords = {
-                    'critical reception', 'critical response',
-                    'reception', 'reviews', 'critical acclaim',
+                self.in_reception   = False
+                self.reception_kw   = {
+                    'critical reception', 'critical response', 'reception',
+                    'reviews', 'critical acclaim',
                     'commercial performance and critical reception'
                 }
+                self.pending_heading = False
+                self.heading_text    = ''
 
-                # State for parsing the review table
-                self.in_table = False
-                self.in_row = False
-                self.in_cell = False
-                self.cell_idx = 0
-                self.current_pub = ''
+                # table state
+                self.in_table     = False
+                self.table_depth  = 0
+                self.in_row       = False
+                self.cell_idx     = 0          # 0 = pub col, 1 = score col
+                self.row_is_header = False     # th-only row = header, skip it
+                self.row_colspan2  = False     # section header row, skip it
+                self.current_pub   = ''
+                self.current_pub_url = None
                 self.current_score = ''
-                self.table_depth = 0
-                self.depth = 0
-                self.header_row = True
+                self.rating_nums   = []        # numbers from Rating template spans
+                self.in_sup        = False     # inside a <sup> citation
+                self.in_pub_link   = False
+                self.pub_link_href = None
 
-                # State for prose paragraphs
-                self.in_para = False
+                # para state
+                self.in_para      = False
                 self.current_para = ''
-                self.after_heading = False
+                self.depth        = 0
+
+            # ---- helpers ----
+            def _clean(self, s):
+                s = re.sub(r'\s+', ' ', s).strip()
+                return s
 
             def handle_starttag(self, tag, attrs):
-                attrs_dict = dict(attrs)
-                classes = attrs_dict.get('class', '')
+                ad = dict(attrs)
+                cl = ad.get('class', '')
 
-                # Detect reception heading (h2/h3 with matching text)
+                # Track headings to find reception section
                 if tag in ('h2', 'h3', 'h4'):
                     self.pending_heading = True
-                    self.heading_text = ''
+                    self.heading_text    = ''
+
+                if self.in_reception and tag == 'h2':
+                    self.in_reception = False
 
                 if self.in_reception:
-                    # Another h2 ends the reception section
-                    if tag == 'h2':
-                        self.in_reception = False
-
-                    if tag == 'table' and ('wikitable' in classes or 'mw-collapsible' in classes):
-                        self.in_table = True
+                    # reception table
+                    if tag == 'table' and ('wikitable' in cl or 'mw-collapsible' in cl):
+                        self.in_table    = True
                         self.table_depth = self.depth
-                        self.header_row = True
 
                     if self.in_table:
                         if tag == 'tr':
-                            self.in_row = True
-                            self.cell_idx = 0
-                            self.current_pub = ''
+                            self.in_row        = True
+                            self.cell_idx      = 0
+                            self.current_pub   = ''
+                            self.current_pub_url = None
                             self.current_score = ''
-                        if tag in ('td', 'th'):
-                            self.in_cell = True
-                        if tag == 'br':
-                            if self.in_cell:
-                                self.current_score += ' '
+                            self.rating_nums   = []
+                            self.row_is_header = True   # assume header until we see td
+                            self.row_colspan2  = False
 
+                        if tag in ('td', 'th'):
+                            colspan = ad.get('colspan', '1')
+                            if colspan == '2':
+                                self.row_colspan2 = True
+                            if tag == 'td':
+                                self.row_is_header = False  # has real data cells
+                            self.in_cell_tag = tag
+
+                        # Capture publication hyperlink (in cell 0)
+                        if tag == 'a' and self.cell_idx == 0 and not self.in_sup:
+                            href = ad.get('href', '')
+                            if href and not href.startswith('#'):
+                                if href.startswith('/wiki/'):
+                                    href = 'https://en.wikipedia.org' + href
+                                self.current_pub_url = href
+                            self.in_pub_link = True
+
+                        # Detect sup (citation) — ignore text inside
+                        if tag == 'sup':
+                            self.in_sup = True
+
+                        # Rating template renders as span with specific structure;
+                        # the numeric values appear as aria-label or title attrs
+                        if tag == 'span':
+                            # {{Rating|X|Y}} → <span title="X out of Y">
+                            title = ad.get('title', '')
+                            m = re.match(r'([\d.]+)\s+out\s+of\s+([\d.]+)', title, re.I)
+                            if m:
+                                self.rating_nums = [float(m.group(1)), float(m.group(2))]
+                            # Also check data attributes used by some templates
+                            aria = ad.get('aria-label', '')
+                            m2 = re.match(r'([\d.]+)\s+out\s+of\s+([\d.]+)', aria, re.I)
+                            if m2:
+                                self.rating_nums = [float(m2.group(1)), float(m2.group(2))]
+
+                        if tag == 'br' and self.cell_idx == 1:
+                            self.current_score += ' '
+
+                    # prose paragraphs (outside table)
                     if tag == 'p' and not self.in_table:
-                        self.in_para = True
+                        self.in_para      = True
                         self.current_para = ''
-                        self.after_heading = False
 
                     if tag == 'br' and self.in_para:
                         self.current_para += ' '
@@ -692,70 +795,88 @@ def fetch_critical_reception(wiki_url):
             def handle_endtag(self, tag):
                 self.depth -= 1
 
+                # Resolve heading
                 if tag in ('h2', 'h3', 'h4'):
-                    heading = getattr(self, 'heading_text', '').lower().strip()
-                    if any(k in heading for k in self.reception_keywords):
+                    heading = self.heading_text.lower().strip()
+                    if any(k in heading for k in self.reception_kw):
                         self.in_reception = True
-                        self.after_heading = True
                     self.pending_heading = False
 
                 if not self.in_reception:
                     return
 
                 if self.in_table:
+                    if tag == 'a' and self.in_pub_link:
+                        self.in_pub_link = False
+                    if tag == 'sup':
+                        self.in_sup = False
                     if tag in ('td', 'th'):
-                        self.in_cell = False
                         self.cell_idx += 1
                     if tag == 'tr' and self.in_row:
                         self.in_row = False
-                        if not self.header_row:
-                            pub   = self.current_pub.strip()
-                            score = self.current_score.strip()
-                            # Clean up score: remove footnote refs like [1]
-                            score = re.sub(r'[.*?]', '', score).strip()
-                            score = re.sub(r'\s+', ' ', score).strip()
-                            if pub and score and len(pub) < 80 and len(score) < 40:
-                                self.reviews.append({
-                                    'publication': pub,
-                                    'score': score
-                                })
-                        self.header_row = False
+                        skip = self.row_is_header or self.row_colspan2
+                        pub   = self._clean(self.current_pub)
+                        score = self._clean(self.current_score)
+
+                        # If Rating template gave us numbers, use those
+                        if self.rating_nums and len(self.rating_nums) == 2:
+                            num, denom = self.rating_nums
+                            score = f"{num}/{denom:.0f}"
+
+                        # Skip header rows ("Source", "Rating", section titles)
+                        if pub.lower() in ('source', 'review', 'reviews', ''):
+                            skip = True
+
+                        if not skip and pub and score:
+                            norm, display = normalize_score(score)
+                            self.reviews.append({
+                                'publication':       pub,
+                                'url':               self.current_pub_url,
+                                'score_raw':         score,
+                                'score_normalized':  norm,
+                                'score_display':     display,
+                            })
 
                     if tag == 'table' and self.depth == self.table_depth:
                         self.in_table = False
 
                 if tag == 'p' and self.in_para:
                     self.in_para = False
-                    para = self.current_para.strip()
-                    para = re.sub(r'[.*?]', '', para)  # strip footnote refs
-                    para = re.sub(r'\s+', ' ', para).strip()
-                    if para and len(para) > 80:
+                    para = self._clean(self.current_para)
+                    # Strip footnote refs [1] [2] etc
+                    para = re.sub(r'\[\d+\]', '', para).strip()
+                    if len(para) > 80:
                         self.summary_paragraphs.append(para)
 
             def handle_data(self, data):
-                if getattr(self, 'pending_heading', False):
-                    self.heading_text = getattr(self, 'heading_text', '') + data
+                if self.pending_heading:
+                    self.heading_text += data
 
                 if not self.in_reception:
                     return
+
+                if self.in_sup:
+                    return  # skip citation text
 
                 text = data.strip()
                 if not text:
                     return
 
-                if self.in_table and self.in_cell:
+                if self.in_table and self.in_row:
                     if self.cell_idx == 0:
                         self.current_pub   += text + ' '
                     elif self.cell_idx == 1:
-                        self.current_score += text + ' '
+                        # Skip star glyph characters — we get values from span attrs
+                        if not re.match(r'^[★☆✦✧\s]+$', text):
+                            self.current_score += text + ' '
 
-                if self.in_para:
+                if self.in_para and not self.in_table:
                     self.current_para += data
 
         parser = ReceptionParser()
         parser.feed(html)
 
-        # Build prose summary from first 1-2 paragraphs
+        # Prose: first 2 paragraphs up to ~550 chars
         prose = ''
         for p in parser.summary_paragraphs[:2]:
             if len(prose) + len(p) < 600:
@@ -769,7 +890,7 @@ def fetch_critical_reception(wiki_url):
 
         result = {}
         if parser.reviews:
-            result['reviews'] = parser.reviews[:15]  # cap at 15 publications
+            result['reviews'] = parser.reviews[:15]
         if prose:
             result['summary'] = prose
 
@@ -777,6 +898,7 @@ def fetch_critical_reception(wiki_url):
 
     except Exception:
         return None
+
 
 # ---------------------------------------------------------------------------
 # API routes
