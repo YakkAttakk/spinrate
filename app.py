@@ -239,67 +239,70 @@ def cover_art_url(mb_id):
         pass
     return None
 
-def mb_artist_wiki(artist_name):
-    """Ask MusicBrainz for the artist's exact Wikipedia URL via URL relations."""
-    data = mb_get('artist', {'query': f'artist:"{artist_name}"', 'limit': 1})
-    if not data or not data.get('artists'):
-        return None
-    mb_artist_id = data['artists'][0].get('id')
-    if not mb_artist_id:
-        return None
-    detail = mb_get(f'artist/{mb_artist_id}', {'inc': 'url-rels'})
-    if not detail:
-        return None
-    for rel in detail.get('relations', []):
-        url = rel.get('url', {}).get('resource', '')
-        if 'wikipedia.org/wiki/' in url:
-            return url
-    return None
-
 def wikipedia_info(artist_name):
-    """Get Wikipedia URL + summary. Uses MusicBrainz to find the exact article."""
-    # First: try to get the exact Wikipedia URL from MusicBrainz
-    wiki_url = mb_artist_wiki(artist_name)
+    """Get Wikipedia URL + summary for a music artist.
 
-    if wiki_url:
+    Uses Wikipedia search API with music-specific terms to avoid
+    grabbing the wrong article (e.g. Swans the animal vs the band).
+    """
+    music_words = ['band', 'music', 'singer', 'rapper', 'musician',
+                   'album', 'record', 'rock', 'jazz', 'pop', 'artist',
+                   'guitarist', 'drummer', 'songwriter', 'producer',
+                   'group', 'duo', 'trio', 'ensemble']
+
+    def fetch_summary(title):
         try:
-            title = wiki_url.rstrip('/').split('/')[-1]
+            encoded = urllib.parse.quote(title.replace(' ', '_'))
             req = urllib.request.Request(
-                f"https://en.wikipedia.org/api/rest_v1/page/summary/{title}",
+                f"https://en.wikipedia.org/api/rest_v1/page/summary/{encoded}",
                 headers=HEADERS)
             with urllib.request.urlopen(req, timeout=6) as r:
-                data = json.loads(r.read())
-            summary = data.get('extract', '')
-            if len(summary) > 400:
-                summary = summary[:400].rsplit(' ', 1)[0] + '…'
-            return wiki_url, summary
+                return json.loads(r.read())
         except Exception:
-            return wiki_url, None
+            return None
 
-    # Fallback: search by name, but sanity-check it's music-related
-    title = urllib.parse.quote(artist_name.replace(' ', '_'))
-    try:
-        req = urllib.request.Request(
-            f"https://en.wikipedia.org/api/rest_v1/page/summary/{title}",
-            headers=HEADERS)
-        with urllib.request.urlopen(req, timeout=6) as r:
-            data = json.loads(r.read())
-        if data.get('type') == 'disambiguation':
-            return None, None
+    def is_music_page(data):
+        if not data or data.get('type') == 'disambiguation':
+            return False
         description = data.get('description', '').lower()
-        extract     = data.get('extract', '').lower()
-        music_words = ['band', 'music', 'singer', 'rapper', 'musician',
-                       'album', 'record', 'rock', 'jazz', 'pop', 'artist',
-                       'guitarist', 'drummer', 'songwriter', 'producer']
-        if not any(w in description or w in extract[:300] for w in music_words):
-            return None, None
-        summary  = data.get('extract', '')
+        extract     = data.get('extract', '').lower()[:400]
+        return any(w in description or w in extract for w in music_words)
+
+    def extract_result(data):
+        summary = data.get('extract', '')
         if len(summary) > 400:
             summary = summary[:400].rsplit(' ', 1)[0] + '…'
         wiki_url = data.get('content_urls', {}).get('desktop', {}).get('page')
         return wiki_url, summary
-    except Exception:
-        return None, None
+
+    # Strategy 1: Wikipedia search API with disambiguating music terms
+    for search_term in [f"{artist_name} band", f"{artist_name} musician",
+                        f"{artist_name} rapper", f"{artist_name} music group",
+                        artist_name]:
+        try:
+            qs = urllib.parse.urlencode({
+                'action': 'query', 'list': 'search',
+                'srsearch': search_term, 'srlimit': 5,
+                'format': 'json'
+            })
+            req = urllib.request.Request(
+                f"https://en.wikipedia.org/w/api.php?{qs}", headers=HEADERS)
+            with urllib.request.urlopen(req, timeout=6) as r:
+                results = json.loads(r.read())
+            for hit in results.get('query', {}).get('search', []):
+                data = fetch_summary(hit.get('title', ''))
+                if is_music_page(data):
+                    return extract_result(data)
+        except Exception:
+            continue
+
+    # Strategy 2: direct name lookup as last resort
+    data = fetch_summary(artist_name)
+    if is_music_page(data):
+        return extract_result(data)
+
+    return None, None
+
 
 # ---------------------------------------------------------------------------
 # API routes
