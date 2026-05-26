@@ -1,22 +1,21 @@
 {% extends "base.html" %}
 {% block title %}{{ artist.name }} — SpinRate{% endblock %}
+
 {% block body %}
 <div class="container">
+
+  <!-- Artist header -->
   <div class="page-header">
-    <div class="flex items-center gap2 wrap">
-      <div>
-        <p class="text-mono text-muted" style="margin-bottom:0.3rem;">Artist</p>
-        <h1>{{ artist.name }}</h1>
-        <div class="flex gap2 mt2 wrap items-center">
-          {% if artist.wiki_url %}
-            <a href="{{ artist.wiki_url }}" target="_blank" rel="noopener"
-               class="badge" style="color:var(--accent);border-color:var(--accent);text-decoration:none;">
-              → Wikipedia
-            </a>
-          {% endif %}
-          <span class="badge text-muted">{{ albums|length }} album{{ 's' if albums|length != 1 }}</span>
-        </div>
-      </div>
+    <p class="text-mono text-muted" style="margin-bottom:0.3rem;">Artist</p>
+    <h1>{{ artist.name }}</h1>
+    <div class="flex gap2 mt2 wrap items-center">
+      {% if artist.wiki_url %}
+        <a href="{{ artist.wiki_url }}" target="_blank" rel="noopener"
+           class="badge" style="color:var(--accent);border-color:var(--accent);text-decoration:none;">
+          → Wikipedia
+        </a>
+      {% endif %}
+      <span class="badge text-muted">{{ albums|length }} album{{ 's' if albums|length != 1 }}</span>
     </div>
     {% if artist.wiki_summary %}
       <p style="margin-top:1rem;max-width:640px;font-size:0.88rem;color:#4a4540;border-left:3px solid var(--gold);padding-left:1rem;">
@@ -25,23 +24,32 @@
     {% endif %}
   </div>
 
+  <!-- Quick Facts expando -->
   {% if infobox %}
-  <div style="margin-bottom:2rem;overflow-x:auto;">
-    <table style="border-collapse:collapse;font-size:0.82rem;width:100%;max-width:520px;">
-      {% for row in infobox %}
-      <tr style="border-bottom:1px solid var(--border);">
-        <td style="padding:0.4rem 1rem 0.4rem 0;font-family:var(--mono);font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;white-space:nowrap;vertical-align:top;width:1%;">
-          {{ row.label }}
-        </td>
-        <td style="padding:0.4rem 0;color:#3a3530;vertical-align:top;">
-          {{ row.value }}
-        </td>
-      </tr>
-      {% endfor %}
-    </table>
+  <div class="expando" style="margin-bottom:1.5rem;">
+    <button class="expando-trigger" onclick="toggleExpando(this)">
+      <span>Quick Facts</span>
+      <span class="expando-chevron">›</span>
+    </button>
+    <div class="expando-body" style="display:none;padding:0.75rem 1rem 1rem;background:var(--card);border:1px solid var(--border);border-top:none;">
+      <table style="border-collapse:collapse;font-size:0.82rem;width:100%;max-width:520px;">
+        {% for row in infobox %}
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:0.4rem 1rem 0.4rem 0;font-family:var(--mono);font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;white-space:nowrap;vertical-align:top;width:1%;">
+            {{ row.label }}
+          </td>
+          <td style="padding:0.4rem 0;color:#3a3530;vertical-align:top;">
+            {{ row.value }}
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
   </div>
   {% endif %}
 
+  <!-- Albums -->
+  <h2 style="font-family:var(--serif);font-size:1.3rem;margin-bottom:1rem;">Albums</h2>
   {% if albums %}
     <div class="album-grid">
       {% for al in albums %}
@@ -57,11 +65,8 @@
             <div class="album-tile-title">{{ al.title }}</div>
             <div class="album-tile-sub">
               {% if al.year %}{{ al.year }} · {% endif %}
-              {% if al.avg_rating %}
-                ★ {{ al.avg_rating }} ({{ al.review_count }})
-              {% else %}
-                No reviews yet
-              {% endif %}
+              {% if al.avg_rating %}★ {{ al.avg_rating }} ({{ al.review_count }})
+              {% else %}No reviews yet{% endif %}
             </div>
           </div>
         </a>
@@ -70,5 +75,29 @@
   {% else %}
     <div class="empty"><div class="big">💿</div>No albums yet.</div>
   {% endif %}
+
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleExpando(btn) {
+  const body    = btn.nextElementSibling;
+  const chevron = btn.querySelector('.expando-chevron');
+  const open    = body.style.display !== 'none';
+  body.style.display      = open ? 'none' : 'block';
+  chevron.style.transform = open ? '' : 'rotate(90deg)';
+}
+</script>
+<style>
+.expando-trigger {
+  width:100%;display:flex;align-items:center;justify-content:space-between;
+  padding:0.65rem 1rem;background:var(--card);border:1px solid var(--border);
+  border-radius:2px;cursor:pointer;font-family:var(--mono);font-size:0.75rem;
+  text-transform:uppercase;letter-spacing:0.08em;color:var(--ink);
+  transition:border-color 0.15s;
+}
+.expando-trigger:hover { border-color:var(--accent); }
+.expando-chevron { font-size:1.1rem;color:var(--muted);transition:transform 0.2s; }
+</style>
 {% endblock %}

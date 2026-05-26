@@ -584,13 +584,11 @@ def fetch_infobox(wiki_url):
 def fetch_critical_reception(wiki_url):
     """Extract critical reception data from a Wikipedia album page.
 
-    Returns a JSON string:
-      {
-        "reviews": [{"publication": str, "url": str|null, "score_raw": str,
-                     "score_normalized": float|null, "score_display": str}, ...],
-        "summary": str
-      }
-    Or None if nothing useful found.
+    Two-pass approach:
+      Pass 1: collect all footnote reference URLs from the References section
+      Pass 2: parse the review table, matching cite_note IDs to external URLs
+
+    Returns JSON: {"reviews": [...], "summary": str} or None
     """
     if not wiki_url:
         return None
@@ -599,7 +597,6 @@ def fetch_critical_reception(wiki_url):
         from html.parser import HTMLParser
 
         title = wiki_url.rstrip('/').split('/wiki/')[-1]
-
         qs = urllib.parse.urlencode({
             'action': 'parse', 'page': urllib.parse.unquote(title),
             'prop': 'text', 'format': 'json',
@@ -615,65 +612,100 @@ def fetch_critical_reception(wiki_url):
             return None
 
         # ----------------------------------------------------------------
-        # Score normalisation — convert any score format to x/5
+        # Pass 1: extract footnote id -> external URL map
+        # Wikipedia renders references as:
+        #   <li id="cite_note-X"><span class="reference-text">...<a href="https://...">
         # ----------------------------------------------------------------
-        def normalize_score(raw):
-            """Return (normalized_float, display_str) or (None, raw)."""
-            raw = raw.strip()
+        class RefParser(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.refs = {}           # cite_note-X -> external url
+                self.current_id = None
+                self.in_ref = False
+                self.found_url = False
 
-            # Strip trailing % sign for percentage scores
+            def handle_starttag(self, tag, attrs):
+                ad = dict(attrs)
+                if tag == 'li':
+                    lid = ad.get('id', '')
+                    if lid.startswith('cite_note-'):
+                        self.current_id = lid
+                        self.in_ref = True
+                        self.found_url = False
+                if self.in_ref and tag == 'a' and not self.found_url:
+                    href = ad.get('href', '')
+                    # Only grab the first external link (not Wikipedia-internal)
+                    if href.startswith('http') and 'wikipedia.org' not in href:
+                        self.refs[self.current_id] = href
+                        self.found_url = True
+
+            def handle_endtag(self, tag):
+                if tag == 'li' and self.in_ref:
+                    self.in_ref = False
+                    self.current_id = None
+
+        ref_parser = RefParser()
+        ref_parser.feed(html)
+        refs = ref_parser.refs   # cite_note-X -> url
+
+        # ----------------------------------------------------------------
+        # Score normalisation
+        # ----------------------------------------------------------------
+        def normalize_score(raw, rating_nums=None):
+            """Return normalized float out of 5, or None."""
+            # Rating template gave us exact numbers
+            if rating_nums and len(rating_nums) == 2:
+                num, denom = rating_nums
+                if denom > 0:
+                    return round(num / denom * 5, 2)
+
+            raw = raw.strip()
+            if not raw:
+                return None
+
+            # Percentage
             if raw.endswith('%'):
                 try:
-                    pct = float(raw[:-1])
-                    return round(pct / 20, 2), f"{pct:.0f}%"
+                    return round(float(raw[:-1]) / 20, 2)
                 except ValueError:
                     pass
 
-            # Letter grades: A+/A/A- B+/B/B- etc (Christgau, Entertainment Weekly)
+            # Letter grades
             grade_map = {
                 'A+': 5.0, 'A': 4.8, 'A-': 4.5,
                 'B+': 4.2, 'B': 4.0, 'B-': 3.7,
                 'C+': 3.3, 'C': 3.0, 'C-': 2.7,
                 'D+': 2.3, 'D': 2.0, 'D-': 1.7,
-                'F': 1.0,
+                'F':  1.0,
             }
-            upper = raw.upper().strip()
-            if upper in grade_map:
-                return grade_map[upper], raw
+            if raw.upper() in grade_map:
+                return grade_map[raw.upper()]
 
-            # X/Y fraction (e.g. 4/5, 8/10, 7.5/10, 4.5/5)
-            m = re.match(r'^(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)$', raw)
+            # X/Y
+            m = re.match(r'^([\d.]+)\s*/\s*([\d.]+)$', raw)
             if m:
                 num, denom = float(m.group(1)), float(m.group(2))
                 if denom > 0:
-                    return round(num / denom * 5, 2), raw
+                    return round(num / denom * 5, 2)
 
-            # Plain number out of 100 (Metacritic style: "78")
+            # Plain integer 0-100 (Metacritic)
             m = re.match(r'^(\d{2,3})$', raw)
             if m:
                 val = int(m.group(1))
                 if 0 <= val <= 100:
-                    return round(val / 20, 2), f"{val}/100"
+                    return round(val / 20, 2)
 
-            # Star count: "★★★★☆" or "4 stars" or "4.5 stars"
-            star_match = re.match(r'^([\d.]+)\s*(?:star|stars|★)', raw, re.I)
-            if star_match:
-                stars = float(star_match.group(1))
-                total_m = re.search(r'(?:out of|/)\s*(\d)', raw, re.I)
-                total = float(total_m.group(1)) if total_m else 5.0
-                return round(stars / total * 5, 2), raw
-
-            # Count filled stars (★) vs total (★+☆)
+            # Counted star glyphs ★★★★☆
             if '★' in raw or '☆' in raw:
                 filled = raw.count('★')
                 total  = raw.count('★') + raw.count('☆')
                 if total > 0:
-                    return round(filled / total * 5, 2), f"{filled}/{total} stars"
+                    return round(filled / total * 5, 2)
 
-            return None, raw
+            return None
 
         # ----------------------------------------------------------------
-        # HTML parser
+        # Pass 2: parse review table and prose
         # ----------------------------------------------------------------
         class ReceptionParser(HTMLParser):
             def __init__(self):
@@ -681,45 +713,40 @@ def fetch_critical_reception(wiki_url):
                 self.reviews = []
                 self.summary_paragraphs = []
 
-                self.in_reception   = False
-                self.reception_kw   = {
+                self.in_reception  = False
+                self.reception_kw  = {
                     'critical reception', 'critical response', 'reception',
                     'reviews', 'critical acclaim',
                     'commercial performance and critical reception'
                 }
                 self.pending_heading = False
                 self.heading_text    = ''
+                self.depth           = 0
 
-                # table state
-                self.in_table     = False
-                self.table_depth  = 0
-                self.in_row       = False
-                self.cell_idx     = 0          # 0 = pub col, 1 = score col
-                self.row_is_header = False     # th-only row = header, skip it
-                self.row_colspan2  = False     # section header row, skip it
+                # table
+                self.in_table      = False
+                self.table_depth   = 0
+                self.in_row        = False
+                self.cell_idx      = 0
+                self.row_is_all_th = True   # flip to False when we see a <td>
+                self.row_colspan2  = False
                 self.current_pub   = ''
-                self.current_pub_url = None
                 self.current_score = ''
-                self.rating_nums   = []        # numbers from Rating template spans
-                self.in_sup        = False     # inside a <sup> citation
+                self.rating_nums   = []
+                self.row_cite_ids  = []     # cite_note ids seen in this row
+                self.in_sup        = False
+                self.sup_cite_id   = None   # cite_note-X from the sup's <a href>
                 self.in_pub_link   = False
-                self.pub_link_href = None
+                self.pub_link_href = None   # wikipedia internal href for pub
 
-                # para state
+                # para
                 self.in_para      = False
                 self.current_para = ''
-                self.depth        = 0
-
-            # ---- helpers ----
-            def _clean(self, s):
-                s = re.sub(r'\s+', ' ', s).strip()
-                return s
 
             def handle_starttag(self, tag, attrs):
                 ad = dict(attrs)
                 cl = ad.get('class', '')
 
-                # Track headings to find reception section
                 if tag in ('h2', 'h3', 'h4'):
                     self.pending_heading = True
                     self.heading_text    = ''
@@ -728,7 +755,7 @@ def fetch_critical_reception(wiki_url):
                     self.in_reception = False
 
                 if self.in_reception:
-                    # reception table
+                    # Allow multiple wikitables (some albums have split tables)
                     if tag == 'table' and ('wikitable' in cl or 'mw-collapsible' in cl):
                         self.in_table    = True
                         self.table_depth = self.depth
@@ -738,55 +765,55 @@ def fetch_critical_reception(wiki_url):
                             self.in_row        = True
                             self.cell_idx      = 0
                             self.current_pub   = ''
-                            self.current_pub_url = None
                             self.current_score = ''
                             self.rating_nums   = []
-                            self.row_is_header = True   # assume header until we see td
+                            self.row_cite_ids  = []
+                            self.row_is_all_th = True
                             self.row_colspan2  = False
+                            self.pub_link_href = None
 
                         if tag in ('td', 'th'):
-                            colspan = ad.get('colspan', '1')
-                            if colspan == '2':
-                                self.row_colspan2 = True
                             if tag == 'td':
-                                self.row_is_header = False  # has real data cells
-                            self.in_cell_tag = tag
+                                self.row_is_all_th = False
+                            colspan = ad.get('colspan', '1')
+                            if colspan != '1':
+                                self.row_colspan2 = True
 
-                        # Capture publication hyperlink (in cell 0)
+                        # Capture <sup> citation reference
+                        if tag == 'sup':
+                            self.in_sup     = True
+                            self.sup_cite_id = None
+
+                        # Inside sup, capture the cite_note href
+                        if self.in_sup and tag == 'a':
+                            href = ad.get('href', '')
+                            m = re.match(r'#(cite_note-.+)', href)
+                            if m:
+                                self.sup_cite_id = m.group(1)
+                                self.row_cite_ids.append(m.group(1))
+
+                        # Pub link (cell 0, not inside sup)
                         if tag == 'a' and self.cell_idx == 0 and not self.in_sup:
                             href = ad.get('href', '')
-                            if href and not href.startswith('#'):
-                                if href.startswith('/wiki/'):
-                                    href = 'https://en.wikipedia.org' + href
-                                self.current_pub_url = href
+                            if href:
+                                self.pub_link_href = href
                             self.in_pub_link = True
 
-                        # Detect sup (citation) — ignore text inside
-                        if tag == 'sup':
-                            self.in_sup = True
-
-                        # Rating template renders as span with specific structure;
-                        # the numeric values appear as aria-label or title attrs
-                        if tag == 'span':
-                            # {{Rating|X|Y}} → <span title="X out of Y">
-                            title = ad.get('title', '')
-                            m = re.match(r'([\d.]+)\s+out\s+of\s+([\d.]+)', title, re.I)
-                            if m:
-                                self.rating_nums = [float(m.group(1)), float(m.group(2))]
-                            # Also check data attributes used by some templates
-                            aria = ad.get('aria-label', '')
-                            m2 = re.match(r'([\d.]+)\s+out\s+of\s+([\d.]+)', aria, re.I)
-                            if m2:
-                                self.rating_nums = [float(m2.group(1)), float(m2.group(2))]
+                        # Rating template: <span title="X out of Y">
+                        if tag == 'span' and self.cell_idx == 1:
+                            for attr_name in ('title', 'aria-label'):
+                                val = ad.get(attr_name, '')
+                                m = re.match(r'([\d.]+)\s+out\s+of\s+([\d.]+)', val, re.I)
+                                if m:
+                                    self.rating_nums = [float(m.group(1)), float(m.group(2))]
+                                    break
 
                         if tag == 'br' and self.cell_idx == 1:
                             self.current_score += ' '
 
-                    # prose paragraphs (outside table)
                     if tag == 'p' and not self.in_table:
                         self.in_para      = True
                         self.current_para = ''
-
                     if tag == 'br' and self.in_para:
                         self.current_para += ' '
 
@@ -795,7 +822,6 @@ def fetch_critical_reception(wiki_url):
             def handle_endtag(self, tag):
                 self.depth -= 1
 
-                # Resolve heading
                 if tag in ('h2', 'h3', 'h4'):
                     heading = self.heading_text.lower().strip()
                     if any(k in heading for k in self.reception_kw):
@@ -806,44 +832,48 @@ def fetch_critical_reception(wiki_url):
                     return
 
                 if self.in_table:
+                    if tag == 'sup':
+                        self.in_sup     = False
+                        self.sup_cite_id = None
                     if tag == 'a' and self.in_pub_link:
                         self.in_pub_link = False
-                    if tag == 'sup':
-                        self.in_sup = False
                     if tag in ('td', 'th'):
                         self.cell_idx += 1
                     if tag == 'tr' and self.in_row:
                         self.in_row = False
-                        skip = self.row_is_header or self.row_colspan2
-                        pub   = self._clean(self.current_pub)
-                        score = self._clean(self.current_score)
+                        pub   = re.sub(r'\s+', ' ', self.current_pub).strip()
+                        score = re.sub(r'\s+', ' ', self.current_score).strip()
 
-                        # If Rating template gave us numbers, use those
-                        if self.rating_nums and len(self.rating_nums) == 2:
-                            num, denom = self.rating_nums
-                            score = f"{num}/{denom:.0f}"
+                        skip = (
+                            self.row_is_all_th or
+                            self.row_colspan2  or
+                            pub.lower() in ('source', 'review', 'reviews', 'publication', '')
+                        )
 
-                        # Skip header rows ("Source", "Rating", section titles)
-                        if pub.lower() in ('source', 'review', 'reviews', ''):
-                            skip = True
+                        if not skip and pub:
+                            norm = normalize_score(score, self.rating_nums)
 
-                        if not skip and pub and score:
-                            norm, display = normalize_score(score)
+                            # Find best external URL for this row:
+                            # prefer cite URLs from the score cell, fall back to pub cell
+                            ext_url = None
+                            for cite_id in reversed(self.row_cite_ids):
+                                if cite_id in refs:
+                                    ext_url = refs[cite_id]
+                                    break
+
                             self.reviews.append({
-                                'publication':       pub,
-                                'url':               self.current_pub_url,
-                                'score_raw':         score,
-                                'score_normalized':  norm,
-                                'score_display':     display,
+                                'publication':      pub,
+                                'url':              ext_url,
+                                'score_normalized': norm,
                             })
 
                     if tag == 'table' and self.depth == self.table_depth:
-                        self.in_table = False
+                        self.in_table    = False
+                        self.table_depth = 0  # reset so next wikitable is picked up
 
                 if tag == 'p' and self.in_para:
                     self.in_para = False
-                    para = self._clean(self.current_para)
-                    # Strip footnote refs [1] [2] etc
+                    para = re.sub(r'\s+', ' ', self.current_para).strip()
                     para = re.sub(r'\[\d+\]', '', para).strip()
                     if len(para) > 80:
                         self.summary_paragraphs.append(para)
@@ -851,32 +881,26 @@ def fetch_critical_reception(wiki_url):
             def handle_data(self, data):
                 if self.pending_heading:
                     self.heading_text += data
-
                 if not self.in_reception:
                     return
-
                 if self.in_sup:
-                    return  # skip citation text
-
+                    return
                 text = data.strip()
                 if not text:
                     return
-
                 if self.in_table and self.in_row:
                     if self.cell_idx == 0:
-                        self.current_pub   += text + ' '
+                        self.current_pub += text + ' '
                     elif self.cell_idx == 1:
-                        # Skip star glyph characters — we get values from span attrs
+                        # Skip pure star glyph strings
                         if not re.match(r'^[★☆✦✧\s]+$', text):
                             self.current_score += text + ' '
-
                 if self.in_para and not self.in_table:
                     self.current_para += data
 
         parser = ReceptionParser()
         parser.feed(html)
 
-        # Prose: first 2 paragraphs up to ~550 chars
         prose = ''
         for p in parser.summary_paragraphs[:2]:
             if len(prose) + len(p) < 600:
@@ -890,7 +914,7 @@ def fetch_critical_reception(wiki_url):
 
         result = {}
         if parser.reviews:
-            result['reviews'] = parser.reviews[:15]
+            result['reviews'] = parser.reviews
         if prose:
             result['summary'] = prose
 
@@ -1118,7 +1142,35 @@ def artist(artist_id):
         except Exception:
             pass
     infobox = json.loads(a['wiki_infobox']) if a['wiki_infobox'] else []
-    return render_template('artist.html', me=me, artist=a, albums=albums, infobox=infobox)
+
+    # Fetch all reviews across all this artist's albums
+    reviews = query("""
+        SELECT r.*, u.username, al.title as album_title, al.id as album_id,
+               al.cover_url, al.year
+        FROM reviews r
+        JOIN users u   ON u.id  = r.user_id
+        JOIN albums al ON al.id = r.album_id
+        WHERE al.artist_id = ?
+        ORDER BY r.created DESC
+    """, (artist_id,))
+
+    # Fetch all comments for those reviews
+    comments_raw = query("""
+        SELECT c.*, u.username
+        FROM comments c JOIN users u ON u.id = c.user_id
+        WHERE c.review_id IN (
+            SELECT r.id FROM reviews r
+            JOIN albums al ON al.id = r.album_id
+            WHERE al.artist_id = ?
+        )
+        ORDER BY c.created ASC
+    """, (artist_id,))
+    comments = {}
+    for c in comments_raw:
+        comments.setdefault(c['review_id'], []).append(c)
+
+    return render_template('artist.html', me=me, artist=a, albums=albums,
+                           infobox=infobox, reviews=reviews, comments=comments)
 
 @app.route('/album/<int:album_id>')
 @login_required
