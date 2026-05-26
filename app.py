@@ -512,33 +512,78 @@ def fetch_infobox(wiki_url):
 # API routes
 # ---------------------------------------------------------------------------
 
-@app.route('/api/search-album')
-@login_required
-def api_search_album():
-    q        = request.args.get('q', '').strip()
-    artist_q = request.args.get('artist', '').strip()
-    if not q:
-        return jsonify([])
-    query_str = f'"{q}"' if artist_q else q
-    if artist_q:
-        query_str += f' AND artist:"{artist_q}"'
-    data = mb_get('release', {'query': query_str, 'limit': 8})
+def _mb_search_releases(query_str, limit=8):
+    """Run a MusicBrainz release search and return normalised result list."""
+    data = mb_get('release', {'query': query_str, 'limit': limit})
     if not data:
-        return jsonify([])
+        return []
     results = []
+    seen = set()
     for rel in data.get('releases', []):
         mb_id  = rel.get('id')
         artist = ''
         if rel.get('artist-credit'):
             artist = rel['artist-credit'][0].get('artist', {}).get('name', '')
+        title  = rel.get('title', '')
+        key    = (artist.lower(), title.lower())
+        if key in seen:
+            continue
+        seen.add(key)
         results.append({
             'mb_id':     mb_id,
-            'title':     rel.get('title', ''),
+            'title':     title,
             'artist':    artist,
             'year':      (rel.get('date') or '')[:4],
             'cover_url': f'/api/cover/{mb_id}' if mb_id else None,
+            'score':     int(rel.get('score', 0)),
         })
-    return jsonify(results)
+    return results
+
+@app.route('/api/search-album')
+@login_required
+def api_search_album():
+    q = request.args.get('q', '').strip()
+    if not q:
+        return jsonify([])
+
+    seen_keys = set()
+    merged = []
+
+    def add_results(rels):
+        for r in rels:
+            key = (r['artist'].lower(), r['title'].lower())
+            if key not in seen_keys:
+                seen_keys.add(key)
+                merged.append(r)
+
+    words = q.split()
+
+    # Strategy 1: release title search on full query
+    add_results(_mb_search_releases(f'release:"{q}"'))
+
+    # Strategy 2: if query looks like "Artist Album" (2+ words),
+    # try splitting at every word boundary and search as artist + title
+    if len(words) >= 2:
+        for i in range(1, len(words)):
+            artist_part = ' '.join(words[:i])
+            title_part  = ' '.join(words[i:])
+            qs = f'artist:"{artist_part}" AND release:"{title_part}"'
+            add_results(_mb_search_releases(qs))
+            # Also try title first, artist second (e.g. "Rumours Fleetwood Mac")
+            qs2 = f'artist:"{title_part}" AND release:"{artist_part}"'
+            add_results(_mb_search_releases(qs2))
+
+    # Strategy 3: loose title search as fallback
+    if not merged:
+        add_results(_mb_search_releases(q))
+
+    # Sort by score descending, cap at 8
+    merged.sort(key=lambda r: r.get('score', 0), reverse=True)
+    # Remove score field before returning
+    for r in merged:
+        r.pop('score', None)
+
+    return jsonify(merged[:8])
 
 @app.route('/api/cover/<mb_id>')
 def api_cover(mb_id):
