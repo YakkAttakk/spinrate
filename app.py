@@ -711,6 +711,719 @@ def fetch_critical_reception(wiki_url):
             def __init__(self):
                 super().__init__()
                 self.reviews = []
+import os
+import sqlite3
+import hashlib
+import secrets
+import json
+import urllib.request
+import urllib.parse
+from datetime import datetime
+from flask import (Flask, request, redirect, url_for, session,
+                   render_template, jsonify, abort, g)
+
+app = Flask(__name__)
+app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
+
+DB_PATH = os.path.join(os.path.dirname(__file__), 'db', 'spinrate.db')
+
+# ---------------------------------------------------------------------------
+# DB helpers — always read DATABASE_URL fresh from environment
+# ---------------------------------------------------------------------------
+
+def _db_url():
+    url = os.environ.get('DATABASE_URL', '')
+    if url.startswith('postgres://'):
+        url = url.replace('postgres://', 'postgresql://', 1)
+    return url
+
+def _using_pg():
+    return bool(os.environ.get('DATABASE_URL', ''))
+
+def get_db():
+    if 'db' not in g:
+        if _using_pg():
+            import psycopg2
+            conn = psycopg2.connect(_db_url())
+            conn.autocommit = False
+            g.db = conn
+            g.db_pg = True
+        else:
+            g.db = sqlite3.connect(DB_PATH, detect_types=sqlite3.PARSE_DECLTYPES)
+            g.db.row_factory = sqlite3.Row
+            g.db.execute("PRAGMA journal_mode=WAL")
+            g.db.execute("PRAGMA foreign_keys=ON")
+            g.db_pg = False
+    return g.db
+
+def query(sql, params=(), one=False):
+    db = get_db()
+    if g.get('db_pg'):
+        import psycopg2.extras
+        sql = sql.replace('?', '%s')
+        with db.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+        return rows[0] if (one and rows) else (None if one else rows)
+    else:
+        cur = db.execute(sql, params)
+        rows = cur.fetchall()
+        return rows[0] if (one and rows) else (None if one else rows)
+
+def execute(sql, params=()):
+    db = get_db()
+    if g.get('db_pg'):
+        sql = sql.replace('?', '%s')
+        if sql.strip().upper().startswith('INSERT') and 'RETURNING' not in sql.upper():
+            sql = sql.rstrip('; ') + ' RETURNING id'
+        with db.cursor() as cur:
+            cur.execute(sql, params)
+            if 'RETURNING' in sql.upper():
+                row = cur.fetchone()
+                return row[0] if row else None
+        return None
+    else:
+        cur = db.execute(sql, params)
+        return cur.lastrowid
+
+def commit():
+    get_db().commit()
+
+@app.teardown_appcontext
+def close_db(exc):
+    db = g.pop('db', None)
+    if db:
+        if exc:
+            try: db.rollback()
+            except Exception: pass
+        db.close()
+
+def init_db():
+    if _using_pg():
+        import psycopg2
+        conn = psycopg2.connect(_db_url())
+        conn.autocommit = True
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id        SERIAL PRIMARY KEY,
+                username  TEXT   NOT NULL UNIQUE,
+                password  TEXT   NOT NULL,
+                bio       TEXT   DEFAULT '',
+                avatar    TEXT   DEFAULT '',
+                created   TEXT   DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS'))
+            );
+            CREATE TABLE IF NOT EXISTS artists (
+                id           SERIAL PRIMARY KEY,
+                name         TEXT   NOT NULL UNIQUE,
+                mb_id        TEXT,
+                wiki_url     TEXT,
+                wiki_summary TEXT,
+                wiki_infobox TEXT,
+                image_url    TEXT,
+                created      TEXT   DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS'))
+            );
+            CREATE TABLE IF NOT EXISTS albums (
+                id           SERIAL PRIMARY KEY,
+                artist_id    INTEGER NOT NULL REFERENCES artists(id),
+                title        TEXT    NOT NULL,
+                mb_id        TEXT,
+                year         TEXT,
+                cover_url    TEXT,
+                genre        TEXT,
+                wiki_url     TEXT,
+                wiki_summary TEXT,
+                wiki_infobox  TEXT,
+                wiki_reception TEXT,
+                created       TEXT    DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS')),
+                UNIQUE(artist_id, title)
+            );
+            CREATE TABLE IF NOT EXISTS reviews (
+                id        SERIAL PRIMARY KEY,
+                user_id   INTEGER NOT NULL REFERENCES users(id),
+                album_id  INTEGER NOT NULL REFERENCES albums(id),
+                rating    INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
+                body      TEXT    NOT NULL,
+                created   TEXT    DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS')),
+                UNIQUE(user_id, album_id)
+            );
+            CREATE TABLE IF NOT EXISTS comments (
+                id         SERIAL PRIMARY KEY,
+                review_id  INTEGER NOT NULL REFERENCES reviews(id) ON DELETE CASCADE,
+                user_id    INTEGER NOT NULL REFERENCES users(id),
+                body       TEXT    NOT NULL,
+                created    TEXT    DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS'))
+            );
+        """)
+        cur.close()
+        conn.close()
+        print("Database initialised successfully (Postgres)")
+    else:
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+        db = sqlite3.connect(DB_PATH)
+        db.executescript("""
+            PRAGMA foreign_keys = ON;
+            CREATE TABLE IF NOT EXISTS users (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                username  TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+                password  TEXT    NOT NULL,
+                bio       TEXT    DEFAULT '',
+                avatar    TEXT    DEFAULT '',
+                created   TEXT    DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS artists (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                name        TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+                mb_id       TEXT,
+                wiki_url    TEXT,
+                wiki_summary TEXT,
+                wiki_infobox TEXT,
+                image_url   TEXT,
+                created     TEXT    DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS albums (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                artist_id   INTEGER NOT NULL REFERENCES artists(id),
+                title       TEXT    NOT NULL,
+                mb_id       TEXT,
+                year        TEXT,
+                cover_url   TEXT,
+                genre       TEXT,
+                wiki_url    TEXT,
+                wiki_summary TEXT,
+                wiki_infobox  TEXT,
+                wiki_reception TEXT,
+                created       TEXT    DEFAULT (datetime('now')),
+                UNIQUE(artist_id, title)
+            );
+            CREATE TABLE IF NOT EXISTS reviews (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     INTEGER NOT NULL REFERENCES users(id),
+                album_id    INTEGER NOT NULL REFERENCES albums(id),
+                rating      INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
+                body        TEXT    NOT NULL,
+                created     TEXT    DEFAULT (datetime('now')),
+                UNIQUE(user_id, album_id)
+            );
+            CREATE TABLE IF NOT EXISTS comments (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                review_id   INTEGER NOT NULL REFERENCES reviews(id) ON DELETE CASCADE,
+                user_id     INTEGER NOT NULL REFERENCES users(id),
+                body        TEXT    NOT NULL,
+                created     TEXT    DEFAULT (datetime('now'))
+            );
+        """)
+        db.commit()
+        db.close()
+        print("Database initialised successfully (SQLite)")
+
+# ---------------------------------------------------------------------------
+# Auth helpers
+# ---------------------------------------------------------------------------
+
+def hash_pw(pw):
+    return hashlib.sha256(pw.encode()).hexdigest()
+
+def current_user():
+    uid = session.get('user_id')
+    if not uid:
+        return None
+    return query("SELECT * FROM users WHERE id=?", (uid,), one=True)
+
+def login_required(f):
+    from functools import wraps
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get('user_id'):
+            return redirect(url_for('login', next=request.path))
+        return f(*args, **kwargs)
+    return decorated
+
+# ---------------------------------------------------------------------------
+# MusicBrainz + Cover Art + Wikipedia helpers
+# ---------------------------------------------------------------------------
+
+MB_BASE  = "https://musicbrainz.org/ws/2"
+CAA_BASE = "https://coverartarchive.org"
+HEADERS  = {'User-Agent': 'SpinRate/1.0 (music-social-app)'}
+
+def mb_get(path, params=None):
+    qs  = urllib.parse.urlencode({**(params or {}), 'fmt': 'json'})
+    url = f"{MB_BASE}/{path}?{qs}"
+    try:
+        req = urllib.request.Request(url, headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=6) as r:
+            return json.loads(r.read())
+    except Exception:
+        return None
+
+def _best_caa_image(images):
+    """Pick the best image URL from a Cover Art Archive images list."""
+    for img in images:
+        if img.get('front'):
+            t = img.get('thumbnails', {})
+            return t.get('500') or t.get('large') or img.get('image')
+    if images:
+        t = images[0].get('thumbnails', {})
+        return t.get('500') or t.get('large') or images[0].get('image')
+    return None
+
+def cover_art_url(mb_id):
+    """Try Cover Art Archive for a specific release."""
+    if not mb_id:
+        return None
+    try:
+        req = urllib.request.Request(f"{CAA_BASE}/release/{mb_id}", headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=6) as r:
+            data = json.loads(r.read())
+        result = _best_caa_image(data.get('images', []))
+        if result:
+            return result
+    except Exception:
+        pass
+    return None
+
+def fetch_cover_art(mb_id, artist_name, album_title, wiki_url=None):
+    """Multi-source cover art fetcher. Returns a URL or None.
+
+    Sources tried in order:
+    1. Cover Art Archive (specific release)
+    2. Cover Art Archive (release group — broader search)
+    3. Wikipedia page thumbnail (lead image on album article)
+    4. MusicBrainz release search -> Cover Art Archive
+    """
+    # 1. CAA by release ID
+    if mb_id:
+        url = cover_art_url(mb_id)
+        if url:
+            return url
+
+        # 2. CAA via release group
+        try:
+            rel_data = mb_get(f'release/{mb_id}', {'inc': 'release-groups'})
+            rg_id = rel_data.get('release-group', {}).get('id') if rel_data else None
+            if rg_id:
+                req = urllib.request.Request(
+                    f"{CAA_BASE}/release-group/{rg_id}", headers=HEADERS)
+                with urllib.request.urlopen(req, timeout=6) as r:
+                    rg_data = json.loads(r.read())
+                url = _best_caa_image(rg_data.get('images', []))
+                if url:
+                    return url
+        except Exception:
+            pass
+
+    # 3. Wikipedia page thumbnail (REST summary has a 'thumbnail' field)
+    if wiki_url:
+        try:
+            title = wiki_url.rstrip('/').split('/wiki/')[-1]
+            encoded = urllib.parse.quote(title)
+            req = urllib.request.Request(
+                f"https://en.wikipedia.org/api/rest_v1/page/summary/{encoded}",
+                headers=HEADERS)
+            with urllib.request.urlopen(req, timeout=6) as r:
+                data = json.loads(r.read())
+            thumb = data.get('thumbnail', {}).get('source')
+            if thumb:
+                # Request a larger version by bumping the pixel width in the URL
+                thumb = thumb.replace('/320px-', '/500px-')
+                return thumb
+        except Exception:
+            pass
+
+    # 4. MusicBrainz text search -> CAA (catches albums entered manually without mb_id)
+    if not mb_id and artist_name and album_title:
+        try:
+            qs = f'artist:"{artist_name}" AND release:"{album_title}"'
+            data = mb_get('release', {'query': qs, 'limit': 3})
+            for rel in (data or {}).get('releases', []):
+                found_id = rel.get('id')
+                if found_id:
+                    url = cover_art_url(found_id)
+                    if url:
+                        return url
+        except Exception:
+            pass
+
+    return None
+
+def wikipedia_info(artist_name):
+    """Get Wikipedia URL + summary for a music artist.
+
+    Uses Wikipedia search API with music-specific terms to avoid
+    grabbing the wrong article (e.g. Swans the animal vs the band).
+    """
+    music_words = ['band', 'music', 'singer', 'rapper', 'musician',
+                   'album', 'record', 'rock', 'jazz', 'pop', 'artist',
+                   'guitarist', 'drummer', 'songwriter', 'producer',
+                   'group', 'duo', 'trio', 'ensemble']
+
+    def fetch_summary(title):
+        try:
+            encoded = urllib.parse.quote(title.replace(' ', '_'))
+            req = urllib.request.Request(
+                f"https://en.wikipedia.org/api/rest_v1/page/summary/{encoded}",
+                headers=HEADERS)
+            with urllib.request.urlopen(req, timeout=6) as r:
+                return json.loads(r.read())
+        except Exception:
+            return None
+
+    def is_music_page(data):
+        if not data or data.get('type') == 'disambiguation':
+            return False
+        description = data.get('description', '').lower()
+        extract     = data.get('extract', '').lower()[:400]
+        return any(w in description or w in extract for w in music_words)
+
+    def extract_result(data):
+        summary = data.get('extract', '')
+        if len(summary) > 400:
+            summary = summary[:400].rsplit(' ', 1)[0] + '…'
+        wiki_url = data.get('content_urls', {}).get('desktop', {}).get('page')
+        return wiki_url, summary
+
+    # Strategy 1: Wikipedia search API with disambiguating music terms
+    for search_term in [f"{artist_name} band", f"{artist_name} musician",
+                        f"{artist_name} rapper", f"{artist_name} music group",
+                        artist_name]:
+        try:
+            qs = urllib.parse.urlencode({
+                'action': 'query', 'list': 'search',
+                'srsearch': search_term, 'srlimit': 5,
+                'format': 'json'
+            })
+            req = urllib.request.Request(
+                f"https://en.wikipedia.org/w/api.php?{qs}", headers=HEADERS)
+            with urllib.request.urlopen(req, timeout=6) as r:
+                results = json.loads(r.read())
+            for hit in results.get('query', {}).get('search', []):
+                data = fetch_summary(hit.get('title', ''))
+                if is_music_page(data):
+                    return extract_result(data)
+        except Exception:
+            continue
+
+    # Strategy 2: direct name lookup as last resort
+    data = fetch_summary(artist_name)
+    if is_music_page(data):
+        return extract_result(data)
+
+    return None, None
+
+
+def album_wikipedia_info(artist_name, album_title):
+    """Search Wikipedia for a specific album and return its URL + summary."""
+    music_words = ['album', 'record', 'ep', 'lp', 'studio', 'soundtrack',
+                   'compilation', 'single', 'release', 'discography']
+
+    def fetch_summary(title):
+        try:
+            encoded = urllib.parse.quote(title.replace(' ', '_'))
+            req = urllib.request.Request(
+                f"https://en.wikipedia.org/api/rest_v1/page/summary/{encoded}",
+                headers=HEADERS)
+            with urllib.request.urlopen(req, timeout=6) as r:
+                return json.loads(r.read())
+        except Exception:
+            return None
+
+    def is_album_page(data):
+        if not data or data.get('type') == 'disambiguation':
+            return False
+        description = data.get('description', '').lower()
+        extract     = data.get('extract', '').lower()[:400]
+        return any(w in description or w in extract for w in music_words)
+
+    def extract_result(data):
+        summary = data.get('extract', '')
+        if len(summary) > 400:
+            summary = summary[:400].rsplit(' ', 1)[0] + '…'
+        wiki_url = data.get('content_urls', {}).get('desktop', {}).get('page')
+        return wiki_url, summary
+
+    # Search Wikipedia for the album with artist name for disambiguation
+    for search_term in [
+        f"{album_title} {artist_name} album",
+        f"{album_title} album",
+        f"{album_title} {artist_name}",
+    ]:
+        try:
+            qs = urllib.parse.urlencode({
+                'action': 'query', 'list': 'search',
+                'srsearch': search_term, 'srlimit': 5,
+                'format': 'json'
+            })
+            req = urllib.request.Request(
+                f"https://en.wikipedia.org/w/api.php?{qs}", headers=HEADERS)
+            with urllib.request.urlopen(req, timeout=6) as r:
+                results = json.loads(r.read())
+            for hit in results.get('query', {}).get('search', []):
+                page_title = hit.get('title', '')
+                data = fetch_summary(page_title)
+                if is_album_page(data):
+                    return extract_result(data)
+        except Exception:
+            continue
+
+    return None, None
+
+def fetch_infobox(wiki_url):
+    """Fetch and parse the Wikipedia infobox for a given page URL.
+    Returns a JSON string of [{label, value}, ...] rows, or None.
+    """
+    if not wiki_url:
+        return None
+    try:
+        from html.parser import HTMLParser
+
+        # Extract page title from URL
+        title = wiki_url.rstrip('/').split('/wiki/')[-1]
+
+        # Fetch parsed HTML via MediaWiki API
+        qs = urllib.parse.urlencode({
+            'action': 'parse', 'page': urllib.parse.unquote(title),
+            'prop': 'text', 'section': '0', 'format': 'json',
+            'disablelot': '1', 'disableeditsection': '1'
+        })
+        req = urllib.request.Request(
+            f"https://en.wikipedia.org/w/api.php?{qs}", headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=8) as r:
+            data = json.loads(r.read())
+
+        html = data.get('parse', {}).get('text', {}).get('*', '')
+        if not html:
+            return None
+
+        # Parse infobox rows from HTML
+        class InfoboxParser(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.rows = []
+                self.in_infobox = False
+                self.in_th = False
+                self.in_td = False
+                self.current_label = ''
+                self.current_value = ''
+                self.depth = 0
+                self.infobox_depth = 0
+                self.skip_depth = 0  # for nested tables
+
+            def handle_starttag(self, tag, attrs):
+                attrs_dict = dict(attrs)
+                classes = attrs_dict.get('class', '')
+                if tag == 'table' and ('infobox' in classes):
+                    self.in_infobox = True
+                    self.infobox_depth = self.depth
+                if self.in_infobox:
+                    if tag == 'table' and self.depth > self.infobox_depth:
+                        self.skip_depth = self.depth  # nested table, skip
+                    if tag == 'th':
+                        self.in_th = True
+                        self.current_label = ''
+                    if tag == 'td':
+                        self.in_td = True
+                        self.current_value = ''
+                    if tag in ('br', 'li'):
+                        if self.in_td:
+                            self.current_value += ' / '
+                self.depth += 1
+
+            def handle_endtag(self, tag):
+                self.depth -= 1
+                if not self.in_infobox:
+                    return
+                if tag == 'table' and self.depth == self.infobox_depth:
+                    self.in_infobox = False
+                if tag == 'th':
+                    self.in_th = False
+                if tag == 'td':
+                    self.in_td = False
+                    label = self.current_label.strip()
+                    value = self.current_value.strip().strip('/ ').strip()
+                    if label and value and len(value) < 300:
+                        self.rows.append({'label': label, 'value': value})
+                if tag == 'tr':
+                    self.current_label = ''
+                    self.current_value = ''
+
+            def handle_data(self, data):
+                if not self.in_infobox:
+                    return
+                if self.skip_depth and self.depth > self.skip_depth:
+                    return
+                text = data.strip()
+                if not text:
+                    return
+                if self.in_th:
+                    self.current_label += text + ' '
+                elif self.in_td:
+                    self.current_value += text + ' '
+
+        parser = InfoboxParser()
+        parser.feed(html)
+
+        # Filter out useless rows (image captions, empty, coords, etc.)
+        skip_labels = {'', 'background', 'label name', 'website', 'coordinates'}
+        skip_prefixes = ('°', '↑', 'List of')
+        rows = []
+        seen_labels = set()
+        for row in parser.rows:
+            label = row['label'].rstrip(':').strip()
+            value = row['value']
+            # Clean up common artifacts
+            import re
+            value = re.sub(r'\s+', ' ', value).strip()
+            value = re.sub(r'[.*?]', '', value).strip()  # remove [note] refs
+            value = value.strip('/ ').strip()
+            if not label or not value:
+                continue
+            if label.lower() in skip_labels:
+                continue
+            if any(value.startswith(p) for p in skip_prefixes):
+                continue
+            if label in seen_labels:
+                continue
+            if len(value) > 200:
+                continue
+            seen_labels.add(label)
+            rows.append({'label': label, 'value': value})
+
+        return json.dumps(rows) if rows else None
+
+    except Exception:
+        return None
+
+def fetch_critical_reception(wiki_url):
+    """Extract critical reception data from a Wikipedia album page.
+
+    Two-pass approach:
+      Pass 1: collect all footnote reference URLs from the References section
+      Pass 2: parse the review table, matching cite_note IDs to external URLs
+
+    Returns JSON: {"reviews": [...], "summary": str} or None
+    """
+    if not wiki_url:
+        return None
+    try:
+        import re
+        from html.parser import HTMLParser
+
+        title = wiki_url.rstrip('/').split('/wiki/')[-1]
+        qs = urllib.parse.urlencode({
+            'action': 'parse', 'page': urllib.parse.unquote(title),
+            'prop': 'text', 'format': 'json',
+            'disablelot': '1', 'disableeditsection': '1'
+        })
+        req = urllib.request.Request(
+            f"https://en.wikipedia.org/w/api.php?{qs}", headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read())
+
+        html = data.get('parse', {}).get('text', {}).get('*', '')
+        if not html:
+            return None
+
+        # ----------------------------------------------------------------
+        # Pass 1: extract footnote id -> external URL map
+        # Wikipedia renders references as:
+        #   <li id="cite_note-X"><span class="reference-text">...<a href="https://...">
+        # ----------------------------------------------------------------
+        class RefParser(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.refs = {}           # cite_note-X -> external url
+                self.current_id = None
+                self.in_ref = False
+                self.found_url = False
+
+            def handle_starttag(self, tag, attrs):
+                ad = dict(attrs)
+                if tag == 'li':
+                    lid = ad.get('id', '')
+                    if lid.startswith('cite_note-'):
+                        self.current_id = lid
+                        self.in_ref = True
+                        self.found_url = False
+                if self.in_ref and tag == 'a' and not self.found_url:
+                    href = ad.get('href', '')
+                    # Only grab the first external link (not Wikipedia-internal)
+                    if href.startswith('http') and 'wikipedia.org' not in href:
+                        self.refs[self.current_id] = href
+                        self.found_url = True
+
+            def handle_endtag(self, tag):
+                if tag == 'li' and self.in_ref:
+                    self.in_ref = False
+                    self.current_id = None
+
+        ref_parser = RefParser()
+        ref_parser.feed(html)
+        refs = ref_parser.refs   # cite_note-X -> url
+
+        # ----------------------------------------------------------------
+        # Score normalisation
+        # ----------------------------------------------------------------
+        def normalize_score(raw, rating_nums=None):
+            """Return normalized float out of 5, or None."""
+            # Rating template gave us exact numbers
+            if rating_nums and len(rating_nums) == 2:
+                num, denom = rating_nums
+                if denom > 0:
+                    return round(num / denom * 5, 2)
+
+            raw = raw.strip()
+            if not raw:
+                return None
+
+            # Percentage
+            if raw.endswith('%'):
+                try:
+                    return round(float(raw[:-1]) / 20, 2)
+                except ValueError:
+                    pass
+
+            # Letter grades
+            grade_map = {
+                'A+': 5.0, 'A': 4.8, 'A-': 4.5,
+                'B+': 4.2, 'B': 4.0, 'B-': 3.7,
+                'C+': 3.3, 'C': 3.0, 'C-': 2.7,
+                'D+': 2.3, 'D': 2.0, 'D-': 1.7,
+                'F':  1.0,
+            }
+            if raw.upper() in grade_map:
+                return grade_map[raw.upper()]
+
+            # X/Y
+            m = re.match(r'^([\d.]+)\s*/\s*([\d.]+)$', raw)
+            if m:
+                num, denom = float(m.group(1)), float(m.group(2))
+                if denom > 0:
+                    return round(num / denom * 5, 2)
+
+            # Plain integer 0-100 (Metacritic)
+            m = re.match(r'^(\d{2,3})$', raw)
+            if m:
+                val = int(m.group(1))
+                if 0 <= val <= 100:
+                    return round(val / 20, 2)
+
+            # Counted star glyphs ★★★★☆
+            if '★' in raw or '☆' in raw:
+                filled = raw.count('★')
+                total  = raw.count('★') + raw.count('☆')
+                if total > 0:
+                    return round(filled / total * 5, 2)
+
+            return None
+
+        # ----------------------------------------------------------------
+        # Pass 2: parse review table and prose
+        # ----------------------------------------------------------------
+        class ReceptionParser(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.reviews = []
                 self.summary_paragraphs = []
 
                 self.in_reception  = False
@@ -1340,6 +2053,32 @@ def new_review():
             return redirect(url_for('album', album_id=album_id))
 
     return render_template('new_review.html', me=me, error=error)
+
+@app.route('/review-album/<int:album_id>', methods=['POST'])
+@login_required
+def review_album(album_id):
+    """Inline review submission from the album page."""
+    me   = current_user()
+    al   = query("SELECT * FROM albums WHERE id=?", (album_id,), one=True)
+    if not al:
+        abort(404)
+    rating = request.form.get('rating', '').strip()
+    body   = request.form.get('body',   '').strip()
+    if rating and body:
+        rating = int(rating)
+        existing = query(
+            "SELECT id FROM reviews WHERE user_id=? AND album_id=?",
+            (me['id'], album_id), one=True)
+        if existing:
+            execute("UPDATE reviews SET rating=?, body=?, created=? WHERE id=?",
+                    (rating, body,
+                     datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+                     existing['id']))
+        else:
+            execute("INSERT INTO reviews (user_id, album_id, rating, body) VALUES (?,?,?,?)",
+                    (me['id'], album_id, rating, body))
+        commit()
+    return redirect(url_for('album', album_id=album_id))
 
 @app.route('/delete-review/<int:review_id>', methods=['POST'])
 @login_required
