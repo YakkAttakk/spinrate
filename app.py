@@ -148,14 +148,62 @@ def cover_art_url(mb_id):
         pass
     return None
 
+def mb_artist_wiki(artist_name):
+    """Ask MusicBrainz for the artist's Wikipedia URL directly."""
+    data = mb_get('artist', {'query': f'artist:"{artist_name}"', 'limit': 1})
+    if not data or not data.get('artists'):
+        return None
+    artist = data['artists'][0]
+    mb_artist_id = artist.get('id')
+    if not mb_artist_id:
+        return None
+    # Fetch full artist record with URL relations
+    detail = mb_get(f'artist/{mb_artist_id}', {'inc': 'url-rels'})
+    if not detail:
+        return None
+    for rel in detail.get('relations', []):
+        url = rel.get('url', {}).get('resource', '')
+        if 'wikipedia.org' in url:
+            return url
+    return None
+
 def wikipedia_info(artist_name):
+    """Get Wikipedia summary, using MusicBrainz to find the exact article."""
+    # First try to get the exact Wikipedia URL from MusicBrainz
+    wiki_url = mb_artist_wiki(artist_name)
+    
+    if wiki_url:
+        # Extract the page title from the URL and fetch the summary
+        try:
+            title = wiki_url.rstrip('/').split('/')[-1]
+            req = urllib.request.Request(
+                f"https://en.wikipedia.org/api/rest_v1/page/summary/{title}",
+                headers=HEADERS)
+            with urllib.request.urlopen(req, timeout=6) as r:
+                data = json.loads(r.read())
+            summary = data.get('extract', '')
+            if len(summary) > 400:
+                summary = summary[:400].rsplit(' ', 1)[0] + '…'
+            return wiki_url, summary
+        except Exception:
+            return wiki_url, None
+    
+    # Fall back to name search (less reliable)
     title = urllib.parse.quote(artist_name.replace(' ', '_'))
-    url = (f"https://en.wikipedia.org/api/rest_v1/page/summary/{title}")
     try:
-        req = urllib.request.Request(url, headers=HEADERS)
+        req = urllib.request.Request(
+            f"https://en.wikipedia.org/api/rest_v1/page/summary/{title}",
+            headers=HEADERS)
         with urllib.request.urlopen(req, timeout=6) as r:
             data = json.loads(r.read())
         if data.get('type') == 'disambiguation':
+            return None, None
+        # Sanity check — make sure it's actually about a musician/band
+        categories = data.get('description', '').lower()
+        extract = data.get('extract', '').lower()
+        music_words = ['band', 'music', 'singer', 'rapper', 'musician', 
+                       'album', 'record', 'rock', 'jazz', 'pop', 'artist']
+        if not any(w in categories or w in extract[:200] for w in music_words):
             return None, None
         summary = data.get('extract', '')
         if len(summary) > 400:
