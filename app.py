@@ -5,29 +5,33 @@ import secrets
 import json
 import urllib.request
 import urllib.parse
+from datetime import datetime
 from flask import (Flask, request, redirect, url_for, session,
                    render_template, jsonify, abort, g)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 
-DATABASE_URL = os.environ.get('DATABASE_URL', '')
-USING_PG = DATABASE_URL.startswith('postgres')
 DB_PATH = os.path.join(os.path.dirname(__file__), 'db', 'spinrate.db')
 
 # ---------------------------------------------------------------------------
-# Database abstraction — SQLite locally, Postgres on Railway
+# DB helpers — always read DATABASE_URL fresh from environment
 # ---------------------------------------------------------------------------
+
+def _db_url():
+    url = os.environ.get('DATABASE_URL', '')
+    if url.startswith('postgres://'):
+        url = url.replace('postgres://', 'postgresql://', 1)
+    return url
+
+def _using_pg():
+    return bool(os.environ.get('DATABASE_URL', ''))
 
 def get_db():
     if 'db' not in g:
-        if USING_PG:
+        if _using_pg():
             import psycopg2
-            import psycopg2.extras
-            url = DATABASE_URL
-            if url.startswith('postgres://'):
-                url = url.replace('postgres://', 'postgresql://', 1)
-            conn = psycopg2.connect(url)
+            conn = psycopg2.connect(_db_url())
             conn.autocommit = False
             g.db = conn
             g.db_pg = True
@@ -40,11 +44,9 @@ def get_db():
     return g.db
 
 def query(sql, params=(), one=False):
-    """Run a SELECT and return Row-like dicts."""
     db = get_db()
     if g.get('db_pg'):
         import psycopg2.extras
-        # Postgres uses %s placeholders; replace ? with %s
         sql = sql.replace('?', '%s')
         with db.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(sql, params)
@@ -56,19 +58,17 @@ def query(sql, params=(), one=False):
         return rows[0] if (one and rows) else (None if one else rows)
 
 def execute(sql, params=()):
-    """Run INSERT/UPDATE/DELETE, return lastrowid."""
     db = get_db()
     if g.get('db_pg'):
-        # Use RETURNING id for INSERT to get lastrowid
         sql = sql.replace('?', '%s')
         if sql.strip().upper().startswith('INSERT') and 'RETURNING' not in sql.upper():
             sql = sql.rstrip('; ') + ' RETURNING id'
         with db.cursor() as cur:
             cur.execute(sql, params)
-            if sql.strip().upper().startswith('INSERT') and 'RETURNING' in sql.upper():
+            if 'RETURNING' in sql.upper():
                 row = cur.fetchone()
                 return row[0] if row else None
-            return None
+        return None
     else:
         cur = db.execute(sql, params)
         return cur.lastrowid
@@ -86,10 +86,9 @@ def close_db(exc):
         db.close()
 
 def init_db():
-    if USING_PG:
+    if _using_pg():
         import psycopg2
-        url = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
-        conn = psycopg2.connect(url)
+        conn = psycopg2.connect(_db_url())
         conn.autocommit = True
         cur = conn.cursor()
         cur.execute("""
@@ -133,6 +132,7 @@ def init_db():
         """)
         cur.close()
         conn.close()
+        print("Database initialised successfully (Postgres)")
     else:
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
         db = sqlite3.connect(DB_PATH)
@@ -178,6 +178,7 @@ def init_db():
         """)
         db.commit()
         db.close()
+        print("Database initialised successfully (SQLite)")
 
 # ---------------------------------------------------------------------------
 # Auth helpers
@@ -238,7 +239,44 @@ def cover_art_url(mb_id):
         pass
     return None
 
+def mb_artist_wiki(artist_name):
+    """Ask MusicBrainz for the artist's exact Wikipedia URL via URL relations."""
+    data = mb_get('artist', {'query': f'artist:"{artist_name}"', 'limit': 1})
+    if not data or not data.get('artists'):
+        return None
+    mb_artist_id = data['artists'][0].get('id')
+    if not mb_artist_id:
+        return None
+    detail = mb_get(f'artist/{mb_artist_id}', {'inc': 'url-rels'})
+    if not detail:
+        return None
+    for rel in detail.get('relations', []):
+        url = rel.get('url', {}).get('resource', '')
+        if 'wikipedia.org/wiki/' in url:
+            return url
+    return None
+
 def wikipedia_info(artist_name):
+    """Get Wikipedia URL + summary. Uses MusicBrainz to find the exact article."""
+    # First: try to get the exact Wikipedia URL from MusicBrainz
+    wiki_url = mb_artist_wiki(artist_name)
+
+    if wiki_url:
+        try:
+            title = wiki_url.rstrip('/').split('/')[-1]
+            req = urllib.request.Request(
+                f"https://en.wikipedia.org/api/rest_v1/page/summary/{title}",
+                headers=HEADERS)
+            with urllib.request.urlopen(req, timeout=6) as r:
+                data = json.loads(r.read())
+            summary = data.get('extract', '')
+            if len(summary) > 400:
+                summary = summary[:400].rsplit(' ', 1)[0] + '…'
+            return wiki_url, summary
+        except Exception:
+            return wiki_url, None
+
+    # Fallback: search by name, but sanity-check it's music-related
     title = urllib.parse.quote(artist_name.replace(' ', '_'))
     try:
         req = urllib.request.Request(
@@ -248,7 +286,14 @@ def wikipedia_info(artist_name):
             data = json.loads(r.read())
         if data.get('type') == 'disambiguation':
             return None, None
-        summary = data.get('extract', '')
+        description = data.get('description', '').lower()
+        extract     = data.get('extract', '').lower()
+        music_words = ['band', 'music', 'singer', 'rapper', 'musician',
+                       'album', 'record', 'rock', 'jazz', 'pop', 'artist',
+                       'guitarist', 'drummer', 'songwriter', 'producer']
+        if not any(w in description or w in extract[:300] for w in music_words):
+            return None, None
+        summary  = data.get('extract', '')
         if len(summary) > 400:
             summary = summary[:400].rsplit(' ', 1)[0] + '…'
         wiki_url = data.get('content_urls', {}).get('desktop', {}).get('page')
@@ -342,7 +387,7 @@ def register():
                              (username,), one=True)
                 session['user_id'] = user['id']
                 return redirect(url_for('home'))
-            except Exception as e:
+            except Exception:
                 error = 'That username is already taken.'
                 try: get_db().rollback()
                 except Exception: pass
@@ -365,8 +410,8 @@ def home():
         SELECT r.*, u.username, al.title as album_title, al.cover_url, al.year,
                ar.name as artist_name, ar.id as artist_id, al.id as album_id
         FROM reviews r
-        JOIN users u   ON u.id  = r.user_id
-        JOIN albums al ON al.id = r.album_id
+        JOIN users u    ON u.id  = r.user_id
+        JOIN albums al  ON al.id = r.album_id
         JOIN artists ar ON ar.id = al.artist_id
         ORDER BY r.created DESC LIMIT 20
     """)
@@ -398,18 +443,19 @@ def artist(artist_id):
     a  = query("SELECT * FROM artists WHERE id=?", (artist_id,), one=True)
     if not a:
         abort(404)
+    pg = _using_pg()
     albums = query("""
         SELECT al.*,
-               COUNT(r.id)        as review_count,
+               COUNT(r.id) as review_count,
                ROUND(AVG(r.rating::numeric), 1) as avg_rating
         FROM albums al
         LEFT JOIN reviews r ON r.album_id = al.id
         WHERE al.artist_id = ?
         GROUP BY al.id
         ORDER BY al.year DESC
-    """ if USING_PG else """
+    """ if pg else """
         SELECT al.*,
-               COUNT(r.id)        as review_count,
+               COUNT(r.id) as review_count,
                ROUND(AVG(r.rating), 1) as avg_rating
         FROM albums al
         LEFT JOIN reviews r ON r.album_id = al.id
@@ -463,7 +509,6 @@ def new_review():
             error = 'Artist, album, rating, and review text are required.'
         else:
             rating = int(rating)
-            # Upsert artist
             existing = query(
                 "SELECT id FROM artists WHERE LOWER(name)=LOWER(?)",
                 (artist_name,), one=True)
@@ -477,7 +522,6 @@ def new_review():
                     "INSERT INTO artists (name, wiki_url, wiki_summary) VALUES (?,?,?)",
                     (artist_name, wiki_url or None, wiki_summary or None))
 
-            # Upsert album
             existing_al = query(
                 "SELECT id FROM albums WHERE artist_id=? AND LOWER(title)=LOWER(?)",
                 (artist_id, album_title), one=True)
@@ -488,14 +532,13 @@ def new_review():
                     "INSERT INTO albums (artist_id, title, mb_id, year, cover_url) VALUES (?,?,?,?,?)",
                     (artist_id, album_title, mb_id or None, year or None, cover_url or None))
 
-            # Insert or update review
             existing_rev = query(
                 "SELECT id FROM reviews WHERE user_id=? AND album_id=?",
                 (me['id'], album_id), one=True)
             if existing_rev:
                 execute("UPDATE reviews SET rating=?, body=?, created=? WHERE id=?",
                         (rating, body,
-                         __import__('datetime').datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+                         datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
                          existing_rev['id']))
             else:
                 execute("INSERT INTO reviews (user_id, album_id, rating, body) VALUES (?,?,?,?)",
@@ -527,7 +570,10 @@ def members():
     return render_template('members.html', me=me, users=users)
 
 # ---------------------------------------------------------------------------
+# Init DB and run
+# ---------------------------------------------------------------------------
+
+init_db()
 
 if __name__ == '__main__':
-    init_db()
     app.run(host='0.0.0.0', port=5001, debug=False)
