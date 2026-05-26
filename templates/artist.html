@@ -25,6 +25,23 @@
     {% endif %}
   </div>
 
+  {% if infobox %}
+  <div style="margin-bottom:2rem;overflow-x:auto;">
+    <table style="border-collapse:collapse;font-size:0.82rem;width:100%;max-width:520px;">
+      {% for row in infobox %}
+      <tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:0.4rem 1rem 0.4rem 0;font-family:var(--mono);font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;white-space:nowrap;vertical-align:top;width:1%;">
+          {{ row.label }}
+        </td>
+        <td style="padding:0.4rem 0;color:#3a3530;vertical-align:top;">
+          {{ row.value }}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endif %}
+
   {% if albums %}
     <div class="album-grid">
       {% for al in albums %}

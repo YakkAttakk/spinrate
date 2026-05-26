@@ -106,6 +106,7 @@ def init_db():
                 mb_id        TEXT,
                 wiki_url     TEXT,
                 wiki_summary TEXT,
+                wiki_infobox TEXT,
                 image_url    TEXT,
                 created      TEXT   DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS'))
             );
@@ -119,6 +120,7 @@ def init_db():
                 genre        TEXT,
                 wiki_url     TEXT,
                 wiki_summary TEXT,
+                wiki_infobox TEXT,
                 created      TEXT    DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS')),
                 UNIQUE(artist_id, title)
             );
@@ -161,6 +163,7 @@ def init_db():
                 mb_id       TEXT,
                 wiki_url    TEXT,
                 wiki_summary TEXT,
+                wiki_infobox TEXT,
                 image_url   TEXT,
                 created     TEXT    DEFAULT (datetime('now'))
             );
@@ -174,6 +177,7 @@ def init_db():
                 genre       TEXT,
                 wiki_url    TEXT,
                 wiki_summary TEXT,
+                wiki_infobox TEXT,
                 created     TEXT    DEFAULT (datetime('now')),
                 UNIQUE(artist_id, title)
             );
@@ -378,6 +382,132 @@ def album_wikipedia_info(artist_name, album_title):
 
     return None, None
 
+def fetch_infobox(wiki_url):
+    """Fetch and parse the Wikipedia infobox for a given page URL.
+    Returns a JSON string of [{label, value}, ...] rows, or None.
+    """
+    if not wiki_url:
+        return None
+    try:
+        from html.parser import HTMLParser
+
+        # Extract page title from URL
+        title = wiki_url.rstrip('/').split('/wiki/')[-1]
+
+        # Fetch parsed HTML via MediaWiki API
+        qs = urllib.parse.urlencode({
+            'action': 'parse', 'page': urllib.parse.unquote(title),
+            'prop': 'text', 'section': '0', 'format': 'json',
+            'disablelot': '1', 'disableeditsection': '1'
+        })
+        req = urllib.request.Request(
+            f"https://en.wikipedia.org/w/api.php?{qs}", headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=8) as r:
+            data = json.loads(r.read())
+
+        html = data.get('parse', {}).get('text', {}).get('*', '')
+        if not html:
+            return None
+
+        # Parse infobox rows from HTML
+        class InfoboxParser(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.rows = []
+                self.in_infobox = False
+                self.in_th = False
+                self.in_td = False
+                self.current_label = ''
+                self.current_value = ''
+                self.depth = 0
+                self.infobox_depth = 0
+                self.skip_depth = 0  # for nested tables
+
+            def handle_starttag(self, tag, attrs):
+                attrs_dict = dict(attrs)
+                classes = attrs_dict.get('class', '')
+                if tag == 'table' and ('infobox' in classes):
+                    self.in_infobox = True
+                    self.infobox_depth = self.depth
+                if self.in_infobox:
+                    if tag == 'table' and self.depth > self.infobox_depth:
+                        self.skip_depth = self.depth  # nested table, skip
+                    if tag == 'th':
+                        self.in_th = True
+                        self.current_label = ''
+                    if tag == 'td':
+                        self.in_td = True
+                        self.current_value = ''
+                    if tag in ('br', 'li'):
+                        if self.in_td:
+                            self.current_value += ' / '
+                self.depth += 1
+
+            def handle_endtag(self, tag):
+                self.depth -= 1
+                if not self.in_infobox:
+                    return
+                if tag == 'table' and self.depth == self.infobox_depth:
+                    self.in_infobox = False
+                if tag == 'th':
+                    self.in_th = False
+                if tag == 'td':
+                    self.in_td = False
+                    label = self.current_label.strip()
+                    value = self.current_value.strip().strip('/ ').strip()
+                    if label and value and len(value) < 300:
+                        self.rows.append({'label': label, 'value': value})
+                if tag == 'tr':
+                    self.current_label = ''
+                    self.current_value = ''
+
+            def handle_data(self, data):
+                if not self.in_infobox:
+                    return
+                if self.skip_depth and self.depth > self.skip_depth:
+                    return
+                text = data.strip()
+                if not text:
+                    return
+                if self.in_th:
+                    self.current_label += text + ' '
+                elif self.in_td:
+                    self.current_value += text + ' '
+
+        parser = InfoboxParser()
+        parser.feed(html)
+
+        # Filter out useless rows (image captions, empty, coords, etc.)
+        skip_labels = {'', 'background', 'label name', 'website', 'coordinates'}
+        skip_prefixes = ('°', '↑', 'List of')
+        rows = []
+        seen_labels = set()
+        for row in parser.rows:
+            label = row['label'].rstrip(':').strip()
+            value = row['value']
+            # Clean up common artifacts
+            import re
+            value = re.sub(r'\s+', ' ', value).strip()
+            value = re.sub(r'\[.*?\]', '', value).strip()  # remove [note] refs
+            value = value.strip('/ ').strip()
+            if not label or not value:
+                continue
+            if label.lower() in skip_labels:
+                continue
+            if any(value.startswith(p) for p in skip_prefixes):
+                continue
+            if label in seen_labels:
+                continue
+            if len(value) > 200:
+                continue
+            seen_labels.add(label)
+            rows.append({'label': label, 'value': value})
+
+        return json.dumps(rows) if rows else None
+
+    except Exception:
+        return None
+
 # ---------------------------------------------------------------------------
 # API routes
 # ---------------------------------------------------------------------------
@@ -540,7 +670,18 @@ def artist(artist_id):
         GROUP BY al.id
         ORDER BY al.year DESC
     """, (artist_id,))
-    return render_template('artist.html', me=me, artist=a, albums=albums)
+    # Lazily fetch and cache artist infobox on first visit
+    if a['wiki_url'] and not a['wiki_infobox']:
+        try:
+            infobox = fetch_infobox(a['wiki_url'])
+            if infobox:
+                execute("UPDATE artists SET wiki_infobox=? WHERE id=?", (infobox, artist_id))
+                commit()
+                a = query("SELECT * FROM artists WHERE id=?", (artist_id,), one=True)
+        except Exception:
+            pass
+    infobox = json.loads(a['wiki_infobox']) if a['wiki_infobox'] else []
+    return render_template('artist.html', me=me, artist=a, albums=albums, infobox=infobox)
 
 @app.route('/album/<int:album_id>')
 @login_required
@@ -563,7 +704,22 @@ def album(album_id):
                 execute("UPDATE albums SET wiki_url=?, wiki_summary=? WHERE id=?",
                         (awiki_url, awiki_summary, album_id))
                 commit()
-                # Re-fetch album with updated wiki info
+                al = query("""
+                    SELECT al.*, ar.name as artist_name, ar.id as artist_id,
+                           ar.wiki_url as ar_wiki_url, ar.wiki_summary as ar_wiki_summary
+                    FROM albums al JOIN artists ar ON ar.id = al.artist_id
+                    WHERE al.id = ?
+                """, (album_id,), one=True)
+        except Exception:
+            pass
+
+    # Lazily fetch and cache album infobox on first visit
+    if al['wiki_url'] and not al.get('wiki_infobox'):
+        try:
+            infobox_json = fetch_infobox(al['wiki_url'])
+            if infobox_json:
+                execute("UPDATE albums SET wiki_infobox=? WHERE id=?", (infobox_json, album_id))
+                commit()
                 al = query("""
                     SELECT al.*, ar.name as artist_name, ar.id as artist_id,
                            ar.wiki_url as ar_wiki_url, ar.wiki_summary as ar_wiki_summary
@@ -595,9 +751,10 @@ def album(album_id):
     comments = {}
     for c in comments_raw:
         comments.setdefault(c['review_id'], []).append(c)
+    infobox = json.loads(al['wiki_infobox']) if al['wiki_infobox'] else []
     return render_template('album.html', me=me, album=al,
                            reviews=reviews, my_review=my_review,
-                           comments=comments)
+                           comments=comments, infobox=infobox)
 
 @app.route('/new-review', methods=['GET', 'POST'])
 @login_required
