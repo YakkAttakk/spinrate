@@ -24,6 +24,12 @@ DB_PATH = os.path.join(os.path.dirname(__file__), 'db', 'spinrate.db')
 # Database helpers
 # ---------------------------------------------------------------------------
 
+@app.route('/debug')
+def debug():
+    import os
+    db_url = os.environ.get('DATABASE_URL', 'NOT SET')
+    return f'DATABASE_URL starts with: {db_url[:30]}... | USING_PG: {USING_PG}'
+
 def get_db():
     if 'db' not in g:
         g.db = sqlite3.connect(DB_PATH, detect_types=sqlite3.PARSE_DECLTYPES)
