@@ -29,8 +29,7 @@
         {% endif %}
         <div>
           <div class="review-meta">
-            <a href="/artist/{{ r.artist_id }}">{{ r.artist_name }}</a>
-            &nbsp;·&nbsp; {{ r.created[:10] }}
+            {{ r.created[:10] }}
             {% if me.id == user.id %}
               &nbsp;·&nbsp;
               <form method="post" action="/delete-review/{{ r.id }}" style="display:inline;"
@@ -41,7 +40,9 @@
           </div>
           <div class="review-album">
             <a href="/album/{{ r.album_id }}">{{ r.album_title }}</a>
-            {% if r.year %}<span class="text-muted" style="font-size:0.8rem;font-family:var(--mono);"> ({{ r.year }})</span>{% endif %}
+            <span style="font-family:var(--sans);font-weight:300;color:var(--muted);margin:0 0.3rem;">by</span>
+            <a href="/artist/{{ r.artist_id }}" style="color:var(--accent);text-decoration:none;font-style:italic;">{{ r.artist_name }}</a>
+            {% if r.year %}<span class="text-muted" style="font-size:0.8rem;font-family:var(--mono);margin-left:0.35rem;">({{ r.year }})</span>{% endif %}
           </div>
           <div class="mt1" data-stars="{{ r.rating }}"></div>
           <div class="review-body">{{ r.body }}</div>

@@ -48,23 +48,18 @@
         </div>
       {% endif %}
 
-      <div style="display:flex;flex-direction:column;gap:0.5rem;margin-top:0.85rem;align-items:flex-start;">
-        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
-          {% if album.ar_wiki_url %}
-            <a href="{{ album.ar_wiki_url }}" target="_blank" rel="noopener"
-               class="badge" style="color:var(--accent);border-color:var(--accent);text-decoration:none;">
-              → Artist on Wikipedia
-            </a>
-          {% endif %}
-          {% if album.wiki_url %}
-            <a href="{{ album.wiki_url }}" target="_blank" rel="noopener"
-               class="badge" style="color:var(--gold);border-color:var(--gold);text-decoration:none;">
-              → Album on Wikipedia
-            </a>
-          {% endif %}
-        </div>
-        {% if not my_review %}
-          <a href="/new-review" class="btn" style="padding:0.4rem 1rem;font-size:0.72rem;">+ Review this album</a>
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.85rem;">
+        {% if album.ar_wiki_url %}
+          <a href="{{ album.ar_wiki_url }}" target="_blank" rel="noopener"
+             class="badge" style="color:var(--accent);border-color:var(--accent);text-decoration:none;">
+            → Artist on Wikipedia
+          </a>
+        {% endif %}
+        {% if album.wiki_url %}
+          <a href="{{ album.wiki_url }}" target="_blank" rel="noopener"
+             class="badge" style="color:var(--gold);border-color:var(--gold);text-decoration:none;">
+            → Album on Wikipedia
+          </a>
         {% endif %}
       </div>
 
@@ -89,7 +84,6 @@
           </p>
         </div>
       {% endif %}
-
     </div>
   </div>
 
@@ -171,7 +165,7 @@
 
   <!-- My review banner -->
   {% if my_review %}
-  <div class="card" style="background:var(--cream);border-color:var(--gold);margin-bottom:1rem;" id="review-{{ my_review.id }}">
+  <div class="card" style="background:var(--cream);border-color:var(--gold);margin-bottom:1rem;">
     <div class="flex justify-between items-center wrap gap2">
       <div>
         <div class="text-mono text-muted" style="font-size:0.7rem;margin-bottom:0.3rem;">Your review</div>
@@ -214,17 +208,51 @@
   </div>
   {% endif %}
 
-  <!-- Reviews -->
-  <h2 style="font-family:var(--serif);font-size:1.4rem;margin-bottom:1rem;">
-    Reviews <span class="text-muted text-mono" style="font-size:0.85rem;">({{ reviews|length }})</span>
-  </h2>
+  <!-- Reviews header + inline write form -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;gap:1rem;flex-wrap:wrap;">
+    <h2 style="font-family:var(--serif);font-size:1.4rem;">
+      Reviews <span class="text-muted text-mono" style="font-size:0.85rem;">({{ reviews|length }})</span>
+    </h2>
+    {% if not my_review %}
+    <button class="btn" onclick="toggleWriteReview()" id="write-btn">+ Review this album</button>
+    {% endif %}
+  </div>
 
+  <!-- Inline review form (hidden by default) -->
+  {% if not my_review %}
+  <div id="inline-review-form" style="display:none;margin-bottom:1.25rem;">
+    <div class="card" style="background:var(--cream);border-color:var(--gold);">
+      <div style="font-family:var(--mono);font-size:0.72rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:1rem;">Your Review</div>
+      <form method="post" action="/review-album/{{ album.id }}">
+        <div class="form-group">
+          <label>Rating</label>
+          <div class="star-picker">
+            <input type="radio" name="rating" id="is5" value="5"><label for="is5">★</label>
+            <input type="radio" name="rating" id="is4" value="4"><label for="is4">★</label>
+            <input type="radio" name="rating" id="is3" value="3"><label for="is3">★</label>
+            <input type="radio" name="rating" id="is2" value="2"><label for="is2">★</label>
+            <input type="radio" name="rating" id="is1" value="1"><label for="is1">★</label>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Review</label>
+          <textarea name="body" rows="4" placeholder="What did you think?"></textarea>
+        </div>
+        <div style="display:flex;gap:0.75rem;align-items:center;">
+          <button type="submit" class="btn">Post Review</button>
+          <button type="button" class="btn btn-outline" onclick="toggleWriteReview()">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Review list -->
   {% if reviews %}
   <div style="display:flex;flex-direction:column;gap:0.5rem;">
     {% for r in reviews %}
       {% if not my_review or r.id != my_review.id %}
       <div class="review-row" id="al-review-{{ r.id }}">
-        <!-- Collapsed row -->
         <div class="review-row-header" onclick="toggleReview('al', {{ r.id }})"
              style="display:flex;align-items:center;gap:1rem;padding:0.75rem 1rem;
                     background:var(--card);border:1px solid var(--border);
@@ -237,9 +265,7 @@
           <div style="flex:1;min-width:0;">
             <a href="/profile/{{ r.username }}"
                style="font-family:var(--mono);font-size:0.8rem;font-weight:500;color:var(--ink);text-decoration:none;"
-               onclick="event.stopPropagation()">
-              {{ r.username }}
-            </a>
+               onclick="event.stopPropagation()">{{ r.username }}</a>
           </div>
           <div style="flex-shrink:0;" data-stars="{{ r.rating }}"></div>
           <div style="font-family:var(--mono);font-size:0.68rem;color:var(--muted);flex-shrink:0;">
@@ -254,7 +280,6 @@
           <div class="review-chevron" style="font-size:1rem;color:var(--muted);flex-shrink:0;transition:transform 0.2s;">›</div>
         </div>
 
-        <!-- Expanded body -->
         <div class="review-row-body" style="display:none;padding:1rem 1.25rem;
              background:var(--card);border:1px solid var(--border);border-top:none;">
           <p style="font-size:0.875rem;color:#3a3530;line-height:1.65;">{{ r.body }}</p>
@@ -304,10 +329,11 @@
     {% endfor %}
   </div>
   {% else %}
-    <div class="empty">
-      <div class="big">📝</div>
-      No reviews yet. <a href="/new-review" style="color:var(--accent);">Write one!</a>
-    </div>
+    {% if my_review %}
+      <div class="empty"><div class="big">📝</div>No other reviews yet.</div>
+    {% else %}
+      <div class="empty"><div class="big">📝</div>No reviews yet.</div>
+    {% endif %}
   {% endif %}
 
 </div>
@@ -323,14 +349,23 @@ function toggleExpando(btn) {
   chevron.style.transform = open ? '' : 'rotate(90deg)';
 }
 
+function toggleWriteReview() {
+  const form = document.getElementById('inline-review-form');
+  const btn  = document.getElementById('write-btn');
+  const open = form.style.display !== 'none';
+  form.style.display = open ? 'none' : 'block';
+  if (btn) btn.textContent = open ? '+ Review this album' : '✕ Cancel';
+  if (!open) form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
 function toggleReview(prefix, id) {
   const wrap    = document.getElementById(prefix + '-review-' + id);
   const header  = wrap.querySelector('.review-row-header');
   const body    = wrap.querySelector('.review-row-body');
   const chevron = wrap.querySelector('.review-chevron');
   const open    = body.style.display !== 'none';
-  body.style.display      = open ? 'none' : 'block';
-  chevron.style.transform = open ? '' : 'rotate(90deg)';
+  body.style.display       = open ? 'none' : 'block';
+  chevron.style.transform  = open ? '' : 'rotate(90deg)';
   header.style.borderColor = open ? 'var(--border)' : 'var(--accent)';
   header.onmouseout = open ? () => header.style.borderColor = 'var(--border)' : null;
 }
