@@ -242,23 +242,94 @@ def mb_get(path, params=None):
     except Exception:
         return None
 
+def _best_caa_image(images):
+    """Pick the best image URL from a Cover Art Archive images list."""
+    for img in images:
+        if img.get('front'):
+            t = img.get('thumbnails', {})
+            return t.get('500') or t.get('large') or img.get('image')
+    if images:
+        t = images[0].get('thumbnails', {})
+        return t.get('500') or t.get('large') or images[0].get('image')
+    return None
+
 def cover_art_url(mb_id):
+    """Try Cover Art Archive for a specific release."""
     if not mb_id:
         return None
     try:
         req = urllib.request.Request(f"{CAA_BASE}/release/{mb_id}", headers=HEADERS)
         with urllib.request.urlopen(req, timeout=6) as r:
             data = json.loads(r.read())
-        images = data.get('images', [])
-        for img in images:
-            if img.get('front'):
-                t = img.get('thumbnails', {})
-                return t.get('500') or t.get('large') or img.get('image')
-        if images:
-            t = images[0].get('thumbnails', {})
-            return t.get('500') or t.get('large') or images[0].get('image')
+        result = _best_caa_image(data.get('images', []))
+        if result:
+            return result
     except Exception:
         pass
+    return None
+
+def fetch_cover_art(mb_id, artist_name, album_title, wiki_url=None):
+    """Multi-source cover art fetcher. Returns a URL or None.
+
+    Sources tried in order:
+    1. Cover Art Archive (specific release)
+    2. Cover Art Archive (release group — broader search)
+    3. Wikipedia page thumbnail (lead image on album article)
+    4. MusicBrainz release search -> Cover Art Archive
+    """
+    # 1. CAA by release ID
+    if mb_id:
+        url = cover_art_url(mb_id)
+        if url:
+            return url
+
+        # 2. CAA via release group
+        try:
+            rel_data = mb_get(f'release/{mb_id}', {'inc': 'release-groups'})
+            rg_id = rel_data.get('release-group', {}).get('id') if rel_data else None
+            if rg_id:
+                req = urllib.request.Request(
+                    f"{CAA_BASE}/release-group/{rg_id}", headers=HEADERS)
+                with urllib.request.urlopen(req, timeout=6) as r:
+                    rg_data = json.loads(r.read())
+                url = _best_caa_image(rg_data.get('images', []))
+                if url:
+                    return url
+        except Exception:
+            pass
+
+    # 3. Wikipedia page thumbnail (REST summary has a 'thumbnail' field)
+    if wiki_url:
+        try:
+            title = wiki_url.rstrip('/').split('/wiki/')[-1]
+            encoded = urllib.parse.quote(title)
+            req = urllib.request.Request(
+                f"https://en.wikipedia.org/api/rest_v1/page/summary/{encoded}",
+                headers=HEADERS)
+            with urllib.request.urlopen(req, timeout=6) as r:
+                data = json.loads(r.read())
+            thumb = data.get('thumbnail', {}).get('source')
+            if thumb:
+                # Request a larger version by bumping the pixel width in the URL
+                thumb = thumb.replace('/320px-', '/500px-')
+                return thumb
+        except Exception:
+            pass
+
+    # 4. MusicBrainz text search -> CAA (catches albums entered manually without mb_id)
+    if not mb_id and artist_name and album_title:
+        try:
+            qs = f'artist:"{artist_name}" AND release:"{album_title}"'
+            data = mb_get('release', {'query': qs, 'limit': 3})
+            for rel in (data or {}).get('releases', []):
+                found_id = rel.get('id')
+                if found_id:
+                    url = cover_art_url(found_id)
+                    if url:
+                        return url
+        except Exception:
+            pass
+
     return None
 
 def wikipedia_info(artist_name):
@@ -748,6 +819,23 @@ def album(album_id):
             if awiki_url or awiki_summary:
                 execute("UPDATE albums SET wiki_url=?, wiki_summary=? WHERE id=?",
                         (awiki_url, awiki_summary, album_id))
+                commit()
+                al = query("""
+                    SELECT al.*, ar.name as artist_name, ar.id as artist_id,
+                           ar.wiki_url as ar_wiki_url, ar.wiki_summary as ar_wiki_summary
+                    FROM albums al JOIN artists ar ON ar.id = al.artist_id
+                    WHERE al.id = ?
+                """, (album_id,), one=True)
+        except Exception:
+            pass
+
+    # Lazily fetch and cache cover art on first visit
+    if not al['cover_url']:
+        try:
+            art = fetch_cover_art(
+                al['mb_id'], al['artist_name'], al['title'], al['wiki_url'])
+            if art:
+                execute("UPDATE albums SET cover_url=? WHERE id=?", (art, album_id))
                 commit()
                 al = query("""
                     SELECT al.*, ar.name as artist_name, ar.id as artist_id,
