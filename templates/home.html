@@ -13,7 +13,6 @@
   {% if reviews %}
   <div class="feed">
     {% for r in reviews %}
-    <a href="/album/{{ r.album_id }}" style="text-decoration:none;color:inherit;display:block;">
     <div class="review-card">
       {% if r.cover_url %}
         <img class="cover" src="{{ r.cover_url }}" alt="{{ r.album_title }}" loading="lazy"
@@ -24,18 +23,30 @@
       {% endif %}
       <div class="review-card-body">
         <div class="review-meta">
-          <a href="/profile/{{ r.username }}" onclick="event.stopPropagation()">{{ r.username }}</a>
+          <a href="/profile/{{ r.username }}">{{ r.username }}</a>
           &nbsp;·&nbsp;{{ r.created[:10] }}
         </div>
-        <div class="review-album">{{ r.album_title }}{% if r.year %} <span style="font-family:var(--mono);font-size:0.78rem;color:var(--muted);font-weight:normal;">({{ r.year }})</span>{% endif %}</div>
+        <div class="review-album">
+          <a href="/album/{{ r.album_id }}">{{ r.album_title }}</a>{% if r.year %} <span style="font-family:var(--mono);font-size:0.78rem;color:var(--muted);font-weight:normal;">({{ r.year }})</span>{% endif %}
+        </div>
         <div class="review-artist">
-          <a href="/artist/{{ r.artist_id }}" onclick="event.stopPropagation()">{{ r.artist_name }}</a>
+          <a href="/artist/{{ r.artist_id }}">{{ r.artist_name }}</a>
         </div>
         <div class="mt1" data-stars="{{ r.rating }}"></div>
         <div class="review-body">{{ r.body }}</div>
+        <div style="margin-top:0.5rem;">
+          <a href="/album/{{ r.album_id }}#al-review-{{ r.id }}"
+             style="font-family:var(--mono);font-size:0.68rem;color:var(--muted);
+                    border:1px solid var(--border);border-radius:2px;
+                    padding:0.2rem 0.55rem;text-decoration:none;
+                    transition:border-color 0.15s,color 0.15s;display:inline-block;"
+             onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'"
+             onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">
+            Full review →
+          </a>
+        </div>
       </div>
     </div>
-    </a>
     {% endfor %}
   </div>
   {% else %}

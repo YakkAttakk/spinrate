@@ -47,6 +47,16 @@
           </div>
           <div class="mt1" data-stars="{{ r.rating }}"></div>
           <div class="review-body">{{ r.body }}</div>
+          <div style="margin-top:0.5rem;">
+            <a href="/album/{{ r.album_id }}#al-review-{{ r.id }}"
+               style="font-family:var(--mono);font-size:0.68rem;color:var(--muted);
+                      border:1px solid var(--border);border-radius:2px;
+                      padding:0.2rem 0.55rem;text-decoration:none;display:inline-block;"
+               onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'"
+               onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">
+              Full review →
+            </a>
+          </div>
         </div>
       </div>
       {% endfor %}
