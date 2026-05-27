@@ -181,10 +181,32 @@ async function fetchWiki(artist) {
   } catch(e) {}
 }
 
-// Also fetch wiki when artist field is manually changed
+function clearEnrichment() {
+  document.getElementById('f_mb_id').value      = '';
+  document.getElementById('f_cover_url').value  = '';
+  document.getElementById('f_wiki_url').value   = '';
+  document.getElementById('f_wiki_summary').value = '';
+  document.getElementById('f_year').value       = '';
+  document.getElementById('coverPreview').style.display = 'none';
+  document.getElementById('wikiBox').style.display     = 'none';
+  lastArtist = '';
+}
+
+// Clear enrichment and re-fetch wiki when artist is manually edited
+document.getElementById('f_artist').addEventListener('input', function() {
+  clearEnrichment();
+  searchInput.value = '';
+});
+
 document.getElementById('f_artist').addEventListener('blur', function() {
   const v = this.value.trim();
   if (v && v !== lastArtist) { lastArtist = v; fetchWiki(v); }
+});
+
+// Clear enrichment when album title is manually edited
+document.getElementById('f_album').addEventListener('input', function() {
+  clearEnrichment();
+  searchInput.value = '';
 });
 
 // Close autocomplete on outside click
