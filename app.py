@@ -370,6 +370,10 @@ def wikipedia_info(artist_name):
         wiki_url = data.get('content_urls', {}).get('desktop', {}).get('page')
         return wiki_url, summary
 
+    import logging
+    log = logging.getLogger(__name__)
+    log.warning(f"ARTIST WIKI SEARCH: {artist_name!r}")
+
     # Strategy 1: Wikipedia search API with disambiguating music terms
     for search_term in [f"{artist_name} band", f"{artist_name} musician",
                         f"{artist_name} rapper", f"{artist_name} music group",
@@ -384,23 +388,37 @@ def wikipedia_info(artist_name):
                 f"https://en.wikipedia.org/w/api.php?{qs}", headers=HEADERS)
             with urllib.request.urlopen(req, timeout=6) as r:
                 results = json.loads(r.read())
-            for hit in results.get('query', {}).get('search', []):
-                data = fetch_summary(hit.get('title', ''))
-                if is_music_page(data):
-                    return extract_result(data)
-        except Exception:
+            hits = results.get('query', {}).get('search', [])
+            log.warning(f"  search_term={search_term!r} -> {[h.get('title') for h in hits]}")
+            for hit in hits:
+                page_title = hit.get('title', '')
+                data = fetch_summary(page_title)
+                is_music = is_music_page(data)
+                log.warning(f"    page={page_title!r} desc={data.get('description','') if data else 'NONE'!r} is_music={is_music}")
+                if is_music:
+                    url, summary = extract_result(data)
+                    log.warning(f"  -> SELECTED: {url}")
+                    return url, summary
+        except Exception as e:
+            log.warning(f"  search_term={search_term!r} EXCEPTION: {e}")
             continue
 
     # Strategy 2: direct name lookup as last resort
     data = fetch_summary(artist_name)
     if is_music_page(data):
-        return extract_result(data)
+        url, summary = extract_result(data)
+        log.warning(f"  -> FALLBACK SELECTED: {url}")
+        return url, summary
 
+    log.warning(f"  -> NO RESULT for {artist_name!r}")
     return None, None
 
 
 def album_wikipedia_info(artist_name, album_title):
     """Search Wikipedia for a specific album and return its URL + summary."""
+    import logging
+    log = logging.getLogger(__name__)
+
     music_words = ['album', 'record', 'ep', 'lp', 'studio', 'soundtrack',
                    'compilation', 'single', 'release', 'discography']
 
@@ -429,6 +447,8 @@ def album_wikipedia_info(artist_name, album_title):
         wiki_url = data.get('content_urls', {}).get('desktop', {}).get('page')
         return wiki_url, summary
 
+    log.warning(f"WIKI SEARCH: artist={artist_name!r} album={album_title!r}")
+
     # Search Wikipedia for the album with artist name for disambiguation
     for search_term in [
         f"{album_title} {artist_name} album",
@@ -445,14 +465,22 @@ def album_wikipedia_info(artist_name, album_title):
                 f"https://en.wikipedia.org/w/api.php?{qs}", headers=HEADERS)
             with urllib.request.urlopen(req, timeout=6) as r:
                 results = json.loads(r.read())
-            for hit in results.get('query', {}).get('search', []):
+            hits = results.get('query', {}).get('search', [])
+            log.warning(f"  search_term={search_term!r} -> {[h.get('title') for h in hits]}")
+            for hit in hits:
                 page_title = hit.get('title', '')
                 data = fetch_summary(page_title)
-                if is_album_page(data):
-                    return extract_result(data)
-        except Exception:
+                is_music = is_album_page(data)
+                log.warning(f"    page={page_title!r} desc={data.get('description','') if data else 'NONE'!r} is_album={is_music}")
+                if is_music:
+                    url, summary = extract_result(data)
+                    log.warning(f"  -> SELECTED: {url}")
+                    return url, summary
+        except Exception as e:
+            log.warning(f"  search_term={search_term!r} EXCEPTION: {e}")
             continue
 
+    log.warning(f"  -> NO RESULT for {album_title!r} by {artist_name!r}")
     return None, None
 
 def fetch_infobox(wiki_url):
