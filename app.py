@@ -928,8 +928,14 @@ def fetch_critical_reception(wiki_url):
 # API routes
 # ---------------------------------------------------------------------------
 
+# Simple in-process cache for MB search results (lasts until server restart)
+_mb_cache = {}
+
 def _mb_search_releases(query_str, limit=8):
     """Run a MusicBrainz release search and return normalised result list."""
+    cache_key = f"{query_str}:{limit}"
+    if cache_key in _mb_cache:
+        return _mb_cache[cache_key]
     data = mb_get('release', {'query': query_str, 'limit': limit})
     if not data:
         return []
@@ -953,6 +959,7 @@ def _mb_search_releases(query_str, limit=8):
             'cover_url': f'/api/cover/{mb_id}' if mb_id else None,
             'score':     int(rel.get('score', 0)),
         })
+    _mb_cache[cache_key] = results
     return results
 
 @app.route('/api/search-album')
@@ -1413,56 +1420,3 @@ def edit_review(review_id):
         commit()
     return redirect(request.referrer or url_for('album', album_id=rev['album_id']))
 
-@app.route('/delete-review/<int:review_id>', methods=['POST'])
-@login_required
-def delete_review(review_id):
-    me  = current_user()
-    rev = query("SELECT * FROM reviews WHERE id=?", (review_id,), one=True)
-    if rev and rev['user_id'] == me['id']:
-        execute("DELETE FROM reviews WHERE id=?", (review_id,))
-        commit()
-    return redirect(request.referrer or url_for('home'))
-
-@app.route('/members')
-@login_required
-def members():
-    me    = current_user()
-    users = query("""
-        SELECT u.*, COUNT(r.id) as review_count
-        FROM users u LEFT JOIN reviews r ON r.user_id = u.id
-        GROUP BY u.id ORDER BY u.username
-    """)
-    return render_template('members.html', me=me, users=users)
-
-@app.route('/comment/<int:review_id>', methods=['POST'])
-@login_required
-def add_comment(review_id):
-    me   = current_user()
-    body = request.form.get('body', '').strip()
-    if body:
-        rev = query("SELECT album_id FROM reviews WHERE id=?", (review_id,), one=True)
-        if rev:
-            execute("INSERT INTO comments (review_id, user_id, body) VALUES (?,?,?)",
-                    (review_id, me['id'], body))
-            commit()
-            return redirect(url_for('album', album_id=rev['album_id']) + f'#review-{review_id}')
-    return redirect(request.referrer or url_for('home'))
-
-@app.route('/delete-comment/<int:comment_id>', methods=['POST'])
-@login_required
-def delete_comment(comment_id):
-    me  = current_user()
-    c   = query("SELECT * FROM comments WHERE id=?", (comment_id,), one=True)
-    if c and c['user_id'] == me['id']:
-        execute("DELETE FROM comments WHERE id=?", (comment_id,))
-        commit()
-    return redirect(request.referrer or url_for('home'))
-
-# ---------------------------------------------------------------------------
-# Init DB and run
-# ---------------------------------------------------------------------------
-
-init_db()
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5001, debug=False)

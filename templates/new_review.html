@@ -92,23 +92,59 @@
 <script>
 let searchTimer;
 const searchInput = document.getElementById('searchInput');
-const acList = document.getElementById('acList');
-const wikiBox = document.getElementById('wikiBox');
+const acList      = document.getElementById('acList');
+const wikiBox     = document.getElementById('wikiBox');
 let lastArtist = '';
+
+// Client-side result cache: query -> items array
+const searchCache = {};
+// Track current fetch so we can ignore stale responses
+let currentQuery = '';
+let currentController = null;
+
+// Show a lightweight loading state inside the dropdown
+function showLoading() {
+  acList.innerHTML = '<div style="padding:0.7rem 0.85rem;font-family:var(--mono);font-size:0.72rem;color:var(--muted);">Searching…</div>';
+  acList.style.display = 'block';
+}
 
 searchInput.addEventListener('input', () => {
   clearTimeout(searchTimer);
   const q = searchInput.value.trim();
   if (q.length < 2) { acList.style.display = 'none'; return; }
-  searchTimer = setTimeout(() => doSearch(q), 350);
+
+  // Cache hit — instant render, no delay
+  if (searchCache[q]) {
+    renderAC(searchCache[q]);
+    return;
+  }
+
+  // Show loading immediately, then fire after short debounce
+  showLoading();
+  searchTimer = setTimeout(() => doSearch(q), 150);
 });
 
 async function doSearch(q) {
+  // Abort any in-flight request
+  if (currentController) currentController.abort();
+  currentController = new AbortController();
+  currentQuery = q;
+
   try {
-    const res = await fetch(`/api/search-album?q=${encodeURIComponent(q)}`);
+    const res = await fetch(`/api/search-album?q=${encodeURIComponent(q)}`,
+                            { signal: currentController.signal });
     const items = await res.json();
+
+    // Ignore if a newer query has already started
+    if (q !== currentQuery) return;
+
+    searchCache[q] = items;
     renderAC(items);
-  } catch(e) {}
+  } catch(e) {
+    if (e.name !== 'AbortError') {
+      acList.style.display = 'none';
+    }
+  }
 }
 
 function renderAC(items) {
