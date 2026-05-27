@@ -1,299 +1,121 @@
-{% extends "base.html" %} {% block title %}{{ album.title }} — SpinRate{%
-endblock %} {% block body %}
+{% extends "base.html" %}
+{% block title %}{{ album.title }} — SpinRate{% endblock %}
+
+{% block body %}
 <div class="container">
+
   <!-- Album header -->
   <style>
-    .album-header {
-      display: grid;
-      grid-template-columns: 180px 1fr;
-      gap: 2rem;
-      margin-bottom: 2rem;
-      align-items: start;
-    }
-    .album-cover {
-      width: 180px;
-      height: 180px;
-    }
-    @media (max-width: 600px) {
-      .album-header {
-        grid-template-columns: 1fr;
-        gap: 1.25rem;
-      }
-      .album-cover {
-        width: 100%;
-        height: auto;
-        aspect-ratio: 1;
-        max-width: 260px;
-        margin: 0 auto;
-      }
+    .album-header { display:grid;grid-template-columns:180px 1fr;gap:2rem;margin-bottom:2rem;align-items:start; }
+    .album-cover  { width:180px;height:180px; }
+    @media (max-width:600px) {
+      .album-header { grid-template-columns:1fr;gap:1.25rem; }
+      .album-cover  { width:100%;height:auto;aspect-ratio:1;max-width:260px;margin:0 auto; }
     }
   </style>
   <div class="album-header">
     <div class="album-cover">
       {% if album.cover_url %}
-      <img
-        src="{{ album.cover_url }}"
-        alt="{{ album.title }}"
-        style="
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-          border: 1px solid var(--border);
-          box-shadow: 4px 4px 0 var(--ink);
-        "
-        onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"
-      />
-      <div
-        style="
-          display: none;
-          width: 100%;
-          height: 100%;
-          background: var(--cream);
-          border: 1px solid var(--border);
-          align-items: center;
-          justify-content: center;
-          font-size: 4rem;
-          box-shadow: 4px 4px 0 var(--ink);
-        "
-      >
-        🎵
-      </div>
+        <img src="{{ album.cover_url }}" alt="{{ album.title }}"
+             style="width:100%;height:100%;object-fit:cover;border:1px solid var(--border);box-shadow:4px 4px 0 var(--ink);"
+             onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+        <div style="display:none;width:100%;height:100%;background:var(--cream);border:1px solid var(--border);align-items:center;justify-content:center;font-size:4rem;box-shadow:4px 4px 0 var(--ink);">🎵</div>
       {% else %}
-      <div
-        style="
-          width: 100%;
-          height: 100%;
-          background: var(--cream);
-          border: 1px solid var(--border);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 4rem;
-          box-shadow: 4px 4px 0 var(--ink);
-        "
-      >
-        🎵
-      </div>
+        <div style="width:100%;height:100%;background:var(--cream);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:4rem;box-shadow:4px 4px 0 var(--ink);">🎵</div>
       {% endif %}
     </div>
 
     <div>
-      <p class="text-mono text-muted" style="margin-bottom: 0.3rem">Album</p>
-      <h1
-        style="font-family: var(--serif); font-size: 2.2rem; line-height: 1.15"
-      >
-        {{ album.title }}
-      </h1>
-      <div style="margin-top: 0.6rem">
-        <a
-          href="/artist/{{ album.artist_id }}"
-          style="
-            font-family: var(--serif);
-            font-size: 1.2rem;
-            font-style: italic;
-            color: var(--accent);
-            text-decoration: none;
-          "
-        >
+      <p class="text-mono text-muted" style="margin-bottom:0.3rem;">Album</p>
+      <h1 style="font-family:var(--serif);font-size:2.2rem;line-height:1.15;">{{ album.title }}</h1>
+      <div style="margin-top:0.6rem;">
+        <a href="/artist/{{ album.artist_id }}"
+           style="font-family:var(--serif);font-size:1.2rem;font-style:italic;color:var(--accent);text-decoration:none;">
           {{ album.artist_name }}
         </a>
         {% if album.year %}
-        <span
-          class="text-muted text-mono"
-          style="font-size: 0.8rem; margin-left: 0.75rem"
-          >{{ album.year }}</span
-        >
+          <span class="text-muted text-mono" style="font-size:0.8rem;margin-left:0.75rem;">{{ album.year }}</span>
         {% endif %}
       </div>
 
-      {% if reviews %} {% set avg = (reviews | map(attribute='rating') | list |
-      sum) / reviews|length %}
-      <div class="flex items-center gap1 mt2">
-        <span data-stars="{{ avg|round|int }}"></span>
-        <span class="text-mono text-muted" style="font-size: 0.72rem">
-          {{ '%.1f'|format(avg) }} avg · {{ reviews|length }} review{{ 's' if
-          reviews|length != 1 }}
-        </span>
-      </div>
-      {% endif %} {% set q_album = (album.title + ' ' + album.artist_name) |
-      urlencode %} {% set q_genius = (album.artist_name + ' ' + album.title) |
-      urlencode %} {% set spotify_search = 'https://open.spotify.com/search/' +
-      q_album %} {% set spotify_app = 'spotify:search:' + (album.title + ' ' +
-      album.artist_name) %} {% set genius_url = 'https://genius.com/search?q=' +
-      q_genius %}
-      <div
-        style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.85rem"
-      >
+      {% if reviews %}
+        {% set avg = (reviews | map(attribute='rating') | list | sum) / reviews|length %}
+        <div class="flex items-center gap1 mt2">
+          <span data-stars="{{ avg|round|int }}"></span>
+          <span class="text-mono text-muted" style="font-size:0.72rem;">
+            {{ '%.1f'|format(avg) }} avg · {{ reviews|length }} review{{ 's' if reviews|length != 1 }}
+          </span>
+        </div>
+      {% endif %}
+
+      {% set q_album  = (album.title + ' ' + album.artist_name) | urlencode %}
+      {% set q_genius  = (album.artist_name + ' ' + album.title) | urlencode %}
+      {% set spotify_search = 'https://open.spotify.com/search/' + q_album %}
+      {% set spotify_app    = 'spotify:search:' + (album.title + ' ' + album.artist_name) %}
+      {% set genius_url     = 'https://genius.com/search?q=' + q_genius %}
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.85rem;">
         {% if album.ar_wiki_url %}
-        <a
-          href="{{ album.ar_wiki_url }}"
-          target="_blank"
-          rel="noopener"
-          class="badge"
-          style="
-            color: var(--accent);
-            border-color: var(--accent);
-            text-decoration: none;
-          "
-        >
-          → Artist on Wikipedia
-        </a>
-        {% endif %} {% if album.wiki_url %}
-        <a
-          href="{{ album.wiki_url }}"
-          target="_blank"
-          rel="noopener"
-          class="badge"
-          style="
-            color: var(--gold);
-            border-color: var(--gold);
-            text-decoration: none;
-          "
-        >
-          → Album on Wikipedia
-        </a>
+          <a href="{{ album.ar_wiki_url }}" target="_blank" rel="noopener"
+             class="badge" style="color:var(--accent);border-color:var(--accent);text-decoration:none;">
+            → Artist on Wikipedia
+          </a>
         {% endif %}
-        <a
-          href="{{ genius_url }}"
-          target="_blank"
-          rel="noopener"
-          class="badge"
-          style="
-            color: #ffff64;
-            border-color: #ffff64;
-            background: #0a0a0a;
-            text-decoration: none;
-          "
-        >
+        {% if album.wiki_url %}
+          <a href="{{ album.wiki_url }}" target="_blank" rel="noopener"
+             class="badge" style="color:var(--gold);border-color:var(--gold);text-decoration:none;">
+            → Album on Wikipedia
+          </a>
+        {% endif %}
+        <a href="{{ genius_url }}" target="_blank" rel="noopener"
+           class="badge" style="color:#ffff64;border-color:#ffff64;background:#0a0a0a;text-decoration:none;">
           → Genius
         </a>
-        <a
-          href="{{ spotify_search }}"
-          target="_blank"
-          rel="noopener"
-          id="spotify-link"
-          data-app-uri="{{ spotify_app }}"
-          class="badge"
-          style="color: #1db954; border-color: #1db954; text-decoration: none"
-        >
+        <a href="{{ spotify_search }}" target="_blank" rel="noopener"
+           id="spotify-link" data-app-uri="{{ spotify_app }}"
+           class="badge" style="color:#1db954;border-color:#1db954;text-decoration:none;">
           → Spotify
         </a>
       </div>
 
       {% if album.wiki_summary %}
-      <div style="margin-top: 1rem">
-        <div
-          style="
-            font-family: var(--mono);
-            font-size: 0.68rem;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            color: var(--muted);
-            margin-bottom: 0.35rem;
-          "
-        >
-          About this album
+        <div style="margin-top:1rem;">
+          <div style="font-family:var(--mono);font-size:0.68rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:0.35rem;">About this album</div>
+          <p style="font-size:0.82rem;color:#4a4540;border-left:3px solid var(--gold);padding-left:0.75rem;line-height:1.55;">
+            {{ album.wiki_summary }}
+            {% if album.wiki_url %}
+              <a href="{{ album.wiki_url }}" target="_blank" rel="noopener"
+                 style="color:var(--accent);font-family:var(--mono);font-size:0.7rem;display:inline-block;margin-top:0.25rem;">
+                Read more →
+              </a>
+            {% endif %}
+          </p>
         </div>
-        <p
-          style="
-            font-size: 0.82rem;
-            color: #4a4540;
-            border-left: 3px solid var(--gold);
-            padding-left: 0.75rem;
-            line-height: 1.55;
-          "
-        >
-          {{ album.wiki_summary }} {% if album.wiki_url %}
-          <a
-            href="{{ album.wiki_url }}"
-            target="_blank"
-            rel="noopener"
-            style="
-              color: var(--accent);
-              font-family: var(--mono);
-              font-size: 0.7rem;
-              display: inline-block;
-              margin-top: 0.25rem;
-            "
-          >
-            Read more →
-          </a>
-          {% endif %}
-        </p>
-      </div>
       {% elif album.ar_wiki_summary %}
-      <div style="margin-top: 1rem">
-        <div
-          style="
-            font-family: var(--mono);
-            font-size: 0.68rem;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            color: var(--muted);
-            margin-bottom: 0.35rem;
-          "
-        >
-          About this artist
+        <div style="margin-top:1rem;">
+          <div style="font-family:var(--mono);font-size:0.68rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:0.35rem;">About this artist</div>
+          <p style="font-size:0.82rem;color:#4a4540;border-left:3px solid var(--gold);padding-left:0.75rem;line-height:1.55;">
+            {{ album.ar_wiki_summary }}
+          </p>
         </div>
-        <p
-          style="
-            font-size: 0.82rem;
-            color: #4a4540;
-            border-left: 3px solid var(--gold);
-            padding-left: 0.75rem;
-            line-height: 1.55;
-          "
-        >
-          {{ album.ar_wiki_summary }}
-        </p>
-      </div>
       {% endif %}
     </div>
   </div>
 
   <!-- Quick Facts expando -->
   {% if infobox %}
-  <div class="expando" style="margin-bottom: 1rem">
+  <div class="expando" style="margin-bottom:1rem;">
     <button class="expando-trigger" onclick="toggleExpando(this)">
       <span>Quick Facts</span>
       <span class="expando-chevron">›</span>
     </button>
-    <div
-      class="expando-body"
-      style="
-        display: none;
-        padding: 0.75rem 1rem 1rem;
-        background: var(--card);
-        border: 1px solid var(--border);
-        border-top: none;
-      "
-    >
-      <table
-        style="
-          border-collapse: collapse;
-          font-size: 0.82rem;
-          width: 100%;
-          max-width: 520px;
-        "
-      >
+    <div class="expando-body" style="display:none;padding:0.75rem 1rem 1rem;background:var(--card);border:1px solid var(--border);border-top:none;">
+      <table style="border-collapse:collapse;font-size:0.82rem;width:100%;max-width:520px;">
         {% for row in infobox %}
-        <tr style="border-bottom: 1px solid var(--border)">
-          <td
-            style="
-              padding: 0.4rem 1rem 0.4rem 0;
-              font-family: var(--mono);
-              font-size: 0.72rem;
-              color: var(--muted);
-              text-transform: uppercase;
-              letter-spacing: 0.05em;
-              white-space: nowrap;
-              vertical-align: top;
-              width: 1%;
-            "
-          >
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:0.4rem 1rem 0.4rem 0;font-family:var(--mono);font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;white-space:nowrap;vertical-align:top;width:1%;">
             {{ row.label }}
           </td>
-          <td style="padding: 0.4rem 0; color: #3a3530; vertical-align: top">
+          <td style="padding:0.4rem 0;color:#3a3530;vertical-align:top;">
             {{ row.value }}
           </td>
         </tr>
@@ -305,79 +127,44 @@ endblock %} {% block body %}
 
   <!-- Critical Reviews expando -->
   {% if reception %}
-  <div class="expando" style="margin-bottom: 1.5rem">
+  <div class="expando" style="margin-bottom:1.5rem;">
     <button class="expando-trigger" onclick="toggleExpando(this)">
       <span>Critical Reviews</span>
       <span class="expando-chevron">›</span>
     </button>
-    <div
-      class="expando-body"
-      style="
-        display: none;
-        padding: 1rem;
-        background: var(--card);
-        border: 1px solid var(--border);
-        border-top: none;
-      "
-    >
+    <div class="expando-body" style="display:none;padding:1rem;background:var(--card);border:1px solid var(--border);border-top:none;">
       {% if reception.summary %}
-      <p
-        style="font-size:0.85rem;color:#3a3530;line-height:1.65;margin-bottom:{% if reception.reviews %}1.25rem{% else %}0{% endif %};"
-      >
-        {{ reception.summary }}
-      </p>
-      {% endif %} {% if reception.reviews %}
-      <div style="overflow-x: auto">
-        <table
-          style="border-collapse: collapse; width: 100%; font-size: 0.82rem"
-        >
+        <p style="font-size:0.85rem;color:#3a3530;line-height:1.65;margin-bottom:{% if reception.reviews %}1.25rem{% else %}0{% endif %};">
+          {{ reception.summary }}
+        </p>
+      {% endif %}
+      {% if reception.reviews %}
+      <div style="overflow-x:auto;">
+        <table style="border-collapse:collapse;width:100%;font-size:0.82rem;">
           <tbody>
             {% for r in reception.reviews %}
-            <tr style="border-bottom: 1px solid var(--border)">
-              <td
-                style="
-                  padding: 0.4rem 1.5rem 0.4rem 0;
-                  color: #3a3530;
-                  white-space: nowrap;
-                "
-              >
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:0.4rem 1.5rem 0.4rem 0;color:#3a3530;white-space:nowrap;">
                 {% if r.url %}
-                <a
-                  href="{{ r.url }}"
-                  target="_blank"
-                  rel="noopener"
-                  style="
-                    color: var(--ink);
-                    text-decoration: none;
-                    border-bottom: 1px dotted var(--muted);
-                  "
-                >
-                  {{ r.publication }}
-                </a>
-                {% else %} {{ r.publication }} {% endif %}
-              </td>
-              <td style="padding: 0.4rem 0; white-space: nowrap">
-                {% if r.score_normalized %} {% set filled = (r.score_normalized
-                | round) | int %} {% for i in range(1, 6) %}
-                <span
-                  style="color:{% if i <= filled %}var(--gold){% else %}var(--border){% endif %};font-size:0.9rem;"
-                  >★</span
-                >
-                {% endfor %}
-                <span
-                  style="
-                    font-family: var(--mono);
-                    font-size: 0.72rem;
-                    color: var(--muted);
-                    margin-left: 0.4rem;
-                  "
-                >
-                  {{ "%.2f"|format(r.score_normalized) }} / 5
-                </span>
+                  <a href="{{ r.url }}" target="_blank" rel="noopener"
+                     style="color:var(--ink);text-decoration:none;border-bottom:1px dotted var(--muted);">
+                    {{ r.publication }}
+                  </a>
                 {% else %}
-                <span class="text-mono text-muted" style="font-size: 0.75rem"
-                  >N/A</span
-                >
+                  {{ r.publication }}
+                {% endif %}
+              </td>
+              <td style="padding:0.4rem 0;white-space:nowrap;">
+                {% if r.score_normalized %}
+                  {% set filled = (r.score_normalized | round) | int %}
+                  {% for i in range(1, 6) %}
+                    <span style="color:{% if i <= filled %}var(--gold){% else %}var(--border){% endif %};font-size:0.9rem;">★</span>
+                  {% endfor %}
+                  <span style="font-family:var(--mono);font-size:0.72rem;color:var(--muted);margin-left:0.4rem;">
+                    {{ "%.2f"|format(r.score_normalized) }} / 5
+                  </span>
+                {% else %}
+                  <span class="text-mono text-muted" style="font-size:0.75rem;">N/A</span>
                 {% endif %}
               </td>
             </tr>
@@ -390,222 +177,118 @@ endblock %} {% block body %}
   </div>
   {% endif %}
 
-  <!-- Reviews header + inline write form -->
-  <div
-    style="
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 1rem;
-      gap: 1rem;
-      flex-wrap: wrap;
-    "
-  >
-    <h2 style="font-family: var(--serif); font-size: 1.4rem">
-      Reviews
-      <span class="text-muted text-mono" style="font-size: 0.85rem"
-        >({{ reviews|length }})</span
-      >
-    </h2>
-    {% if not my_review %}
-    <button class="btn" onclick="toggleWriteReview()" id="write-btn">
-      + Review this album
-    </button>
-    {% endif %}
-  </div>
-
   <!-- My review banner -->
   {% if my_review %}
-  <div
-    class="card"
-    style="
-      background: var(--cream);
-      border-color: var(--gold);
-      margin-bottom: 1rem;
-    "
-  >
-    <div class="flex justify-between items-center wrap gap2">
-      <div>
-        <div
-          class="text-mono text-muted"
-          style="font-size: 0.7rem; margin-bottom: 0.3rem"
-        >
-          Your review
-        </div>
-        <div data-stars="{{ my_review.rating }}"></div>
-        <p style="font-size: 0.875rem; margin-top: 0.4rem">
-          {{ my_review.body }}
-        </p>
-      </div>
-      <form
-        method="post"
-        action="/delete-review/{{ my_review.id }}"
-        onsubmit="return confirm('Delete your review?')"
-      >
-        <button
-          type="submit"
-          class="btn btn-danger"
-          style="font-size: 0.72rem; padding: 0.4rem 0.9rem"
-        >
-          Delete
-        </button>
-      </form>
-    </div>
-    {% set my_comments = comments.get(my_review.id, []) %} {% if my_comments %}
-    <div
-      style="
-        margin-top: 1rem;
-        padding-top: 1rem;
-        border-top: 1px solid var(--border);
-      "
-    >
-      {% for c in my_comments %}
-      <div
-        style="
-          display: flex;
-          gap: 0.75rem;
-          margin-bottom: 0.75rem;
-          align-items: flex-start;
-        "
-      >
-        <div
-          class="avatar-circle"
-          style="width: 28px; height: 28px; font-size: 0.75rem; flex-shrink: 0"
-        >
-          {{ c.username[0].upper() }}
-        </div>
-        <div style="flex: 1">
-          <div
-            style="
-              font-family: var(--mono);
-              font-size: 0.7rem;
-              color: var(--muted);
-            "
-          >
-            <a
-              href="/profile/{{ c.username }}"
-              style="color: var(--ink); text-decoration: none"
-              >{{ c.username }}</a
-            >
-            · {{ c.created[:10] }} {% if c.user_id == me.id %} ·
-            <form
-              method="post"
-              action="/delete-comment/{{ c.id }}"
-              style="display: inline"
-            >
-              <button
-                type="submit"
-                style="
-                  background: none;
-                  border: none;
-                  color: var(--accent);
-                  font-family: var(--mono);
-                  font-size: 0.68rem;
-                  cursor: pointer;
-                  padding: 0;
-                "
-              >
-                delete
-              </button>
-            </form>
-            {% endif %}
-          </div>
-          <p style="font-size: 0.85rem; margin-top: 0.2rem">{{ c.body }}</p>
-        </div>
-      </div>
-      {% endfor %}
-    </div>
-    {% endif %}
-    <form
-      method="post"
-      action="/comment/{{ my_review.id }}"
-      style="
-        margin-top: 1rem;
-        padding-top: 1rem;
-        border-top: 1px solid var(--border);
-        display: flex;
-        gap: 0.75rem;
-      "
-    >
-      <input
-        type="text"
-        name="body"
-        placeholder="Reply to your own review…"
-        style="flex: 1; padding: 0.5rem 0.75rem; font-size: 0.85rem"
-      />
-      <button
-        type="submit"
-        class="btn"
-        style="padding: 0.5rem 1rem; font-size: 0.72rem"
-      >
-        Reply
-      </button>
-    </form>
-  </div>
-  {% endif %}
+  <div class="card" style="background:var(--cream);border-color:var(--gold);margin-bottom:1rem;">
 
-  <!-- Inline review form (hidden by default) -->
-  {% if not my_review %}
-  <div id="inline-review-form" style="display: none; margin-bottom: 1.25rem">
-    <div
-      class="card"
-      style="background: var(--cream); border-color: var(--gold)"
-    >
-      <div
-        style="
-          font-family: var(--mono);
-          font-size: 0.72rem;
-          text-transform: uppercase;
-          letter-spacing: 0.08em;
-          color: var(--muted);
-          margin-bottom: 1rem;
-        "
-      >
-        Your Review
+    <!-- View mode -->
+    <div id="my-review-view">
+      <div class="flex justify-between items-center wrap gap2">
+        <div>
+          <div class="text-mono text-muted" style="font-size:0.7rem;margin-bottom:0.3rem;">Your review</div>
+          <div data-stars="{{ my_review.rating }}"></div>
+          <p style="font-size:0.875rem;margin-top:0.4rem;" id="my-review-body">{{ my_review.body }}</p>
+        </div>
+        <div style="display:flex;gap:0.5rem;flex-shrink:0;">
+          <button onclick="toggleEditReview()" class="btn btn-outline"
+                  style="font-size:0.72rem;padding:0.4rem 0.9rem;">Edit</button>
+          <form method="post" action="/delete-review/{{ my_review.id }}"
+                onsubmit="return confirm('Delete your review?')" style="display:inline;">
+            <button type="submit" class="btn btn-danger"
+                    style="font-size:0.72rem;padding:0.4rem 0.9rem;">Delete</button>
+          </form>
+        </div>
       </div>
-      <form method="post" action="/review-album/{{ album.id }}">
+    </div>
+
+    <!-- Edit mode (hidden by default) -->
+    <div id="my-review-edit" style="display:none;">
+      <div class="text-mono text-muted" style="font-size:0.7rem;margin-bottom:0.75rem;">Edit your review</div>
+      <form method="post" action="/edit-review/{{ my_review.id }}">
         <div class="form-group">
           <label>Rating</label>
           <div class="star-picker">
-            <input type="radio" name="rating" id="is5" value="5" /><label
-              for="is5"
-              >★</label
-            >
-            <input type="radio" name="rating" id="is4" value="4" /><label
-              for="is4"
-              >★</label
-            >
-            <input type="radio" name="rating" id="is3" value="3" /><label
-              for="is3"
-              >★</label
-            >
-            <input type="radio" name="rating" id="is2" value="2" /><label
-              for="is2"
-              >★</label
-            >
-            <input type="radio" name="rating" id="is1" value="1" /><label
-              for="is1"
-              >★</label
-            >
+            <input type="radio" name="rating" id="er5" value="5" {% if my_review.rating == 5 %}checked{% endif %}><label for="er5">★</label>
+            <input type="radio" name="rating" id="er4" value="4" {% if my_review.rating == 4 %}checked{% endif %}><label for="er4">★</label>
+            <input type="radio" name="rating" id="er3" value="3" {% if my_review.rating == 3 %}checked{% endif %}><label for="er3">★</label>
+            <input type="radio" name="rating" id="er2" value="2" {% if my_review.rating == 2 %}checked{% endif %}><label for="er2">★</label>
+            <input type="radio" name="rating" id="er1" value="1" {% if my_review.rating == 1 %}checked{% endif %}><label for="er1">★</label>
           </div>
         </div>
         <div class="form-group">
           <label>Review</label>
-          <textarea
-            name="body"
-            rows="4"
-            placeholder="What did you think?"
-          ></textarea>
+          <textarea name="body" rows="4" required>{{ my_review.body }}</textarea>
         </div>
-        <div style="display: flex; gap: 0.75rem; align-items: center">
+        <div style="display:flex;gap:0.75rem;">
+          <button type="submit" class="btn">Save</button>
+          <button type="button" class="btn btn-outline" onclick="toggleEditReview()">Cancel</button>
+        </div>
+      </form>
+    </div>
+    {% set my_comments = comments.get(my_review.id, []) %}
+    {% if my_comments %}
+      <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);">
+        {% for c in my_comments %}
+          <div style="display:flex;gap:0.75rem;margin-bottom:0.75rem;align-items:flex-start;">
+            <div class="avatar-circle" style="width:28px;height:28px;font-size:0.75rem;flex-shrink:0;">{{ c.username[0].upper() }}</div>
+            <div style="flex:1;">
+              <div style="font-family:var(--mono);font-size:0.7rem;color:var(--muted);">
+                <a href="/profile/{{ c.username }}" style="color:var(--ink);text-decoration:none;">{{ c.username }}</a>
+                · {{ c.created[:10] }}
+                {% if c.user_id == me.id %}
+                  · <form method="post" action="/delete-comment/{{ c.id }}" style="display:inline;">
+                      <button type="submit" style="background:none;border:none;color:var(--accent);font-family:var(--mono);font-size:0.68rem;cursor:pointer;padding:0;">delete</button>
+                    </form>
+                {% endif %}
+              </div>
+              <p style="font-size:0.85rem;margin-top:0.2rem;">{{ c.body }}</p>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+    <form method="post" action="/comment/{{ my_review.id }}"
+          style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);display:flex;gap:0.75rem;">
+      <input type="text" name="body" placeholder="Reply to your own review…"
+             style="flex:1;padding:0.5rem 0.75rem;font-size:0.85rem;">
+      <button type="submit" class="btn" style="padding:0.5rem 1rem;font-size:0.72rem;">Reply</button>
+    </form>
+  </div>
+  {% endif %}
+
+  <!-- Reviews header + inline write form -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;gap:1rem;flex-wrap:wrap;">
+    <h2 style="font-family:var(--serif);font-size:1.4rem;">
+      Reviews <span class="text-muted text-mono" style="font-size:0.85rem;">({{ reviews|length }})</span>
+    </h2>
+    {% if not my_review %}
+    <button class="btn" onclick="toggleWriteReview()" id="write-btn">+ Review this album</button>
+    {% endif %}
+  </div>
+
+  <!-- Inline review form (hidden by default) -->
+  {% if not my_review %}
+  <div id="inline-review-form" style="display:none;margin-bottom:1.25rem;">
+    <div class="card" style="background:var(--cream);border-color:var(--gold);">
+      <div style="font-family:var(--mono);font-size:0.72rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:1rem;">Your Review</div>
+      <form method="post" action="/review-album/{{ album.id }}">
+        <div class="form-group">
+          <label>Rating</label>
+          <div class="star-picker">
+            <input type="radio" name="rating" id="is5" value="5"><label for="is5">★</label>
+            <input type="radio" name="rating" id="is4" value="4"><label for="is4">★</label>
+            <input type="radio" name="rating" id="is3" value="3"><label for="is3">★</label>
+            <input type="radio" name="rating" id="is2" value="2"><label for="is2">★</label>
+            <input type="radio" name="rating" id="is1" value="1"><label for="is1">★</label>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Review</label>
+          <textarea name="body" rows="4" placeholder="What did you think?"></textarea>
+        </div>
+        <div style="display:flex;gap:0.75rem;align-items:center;">
           <button type="submit" class="btn">Post Review</button>
-          <button
-            type="button"
-            class="btn btn-outline"
-            onclick="toggleWriteReview()"
-          >
-            Cancel
-          </button>
+          <button type="button" class="btn btn-outline" onclick="toggleWriteReview()">Cancel</button>
         </div>
       </form>
     </div>
@@ -614,318 +297,173 @@ endblock %} {% block body %}
 
   <!-- Review list -->
   {% if reviews %}
-  <div style="display: flex; flex-direction: column; gap: 0.5rem">
-    {% for r in reviews %} {% if not my_review or r.id != my_review.id %}
-    <div class="review-row" id="al-review-{{ r.id }}">
-      <div
-        class="review-row-header"
-        onclick="toggleReview('al', {{ r.id }})"
-        style="
-          display: flex;
-          align-items: center;
-          gap: 1rem;
-          padding: 0.75rem 1rem;
-          background: var(--card);
-          border: 1px solid var(--border);
-          cursor: pointer;
-          transition: border-color 0.15s;
-        "
-        onmouseover="this.style.borderColor='var(--accent)'"
-        onmouseout="this.style.borderColor='var(--border)'"
-      >
-        <div
-          class="avatar-circle"
-          style="width: 32px; height: 32px; font-size: 0.85rem; flex-shrink: 0"
-        >
-          {{ r.username[0].upper() }}
-        </div>
-        <div style="flex: 1; min-width: 0">
-          <a
-            href="/profile/{{ r.username }}"
-            style="
-              font-family: var(--mono);
-              font-size: 0.8rem;
-              font-weight: 500;
-              color: var(--ink);
-              text-decoration: none;
-            "
-            onclick="event.stopPropagation()"
-            >{{ r.username }}</a
-          >
-        </div>
-        <div style="flex-shrink: 0" data-stars="{{ r.rating }}"></div>
-        <div
-          style="
-            font-family: var(--mono);
-            font-size: 0.68rem;
-            color: var(--muted);
-            flex-shrink: 0;
-          "
-        >
-          {{ r.created[:10] }}
-        </div>
-        {% set rev_comments = comments.get(r.id, []) %} {% if rev_comments %}
-        <div
-          style="
-            font-family: var(--mono);
-            font-size: 0.68rem;
-            color: var(--muted);
-            flex-shrink: 0;
-          "
-        >
-          💬 {{ rev_comments|length }}
-        </div>
-        {% endif %}
-        <div
-          class="review-chevron"
-          style="
-            font-size: 1rem;
-            color: var(--muted);
-            flex-shrink: 0;
-            transition: transform 0.2s;
-          "
-        >
-          ›
-        </div>
-      </div>
-
-      <div
-        class="review-row-body"
-        style="
-          display: none;
-          padding: 1rem 1.25rem;
-          background: var(--card);
-          border: 1px solid var(--border);
-          border-top: none;
-        "
-      >
-        <p style="font-size: 0.875rem; color: #3a3530; line-height: 1.65">
-          {{ r.body }}
-        </p>
-
-        {% set rev_comments = comments.get(r.id, []) %} {% if rev_comments %}
-        <div
-          style="
-            margin-top: 1rem;
-            padding-top: 1rem;
-            border-top: 1px solid var(--border);
-          "
-        >
-          {% for c in rev_comments %}
-          <div
-            style="
-              display: flex;
-              gap: 0.75rem;
-              margin-bottom: 0.75rem;
-              align-items: flex-start;
-            "
-          >
-            <div
-              class="avatar-circle"
-              style="
-                width: 26px;
-                height: 26px;
-                font-size: 0.72rem;
-                flex-shrink: 0;
-              "
-            >
-              {{ c.username[0].upper() }}
-            </div>
-            <div style="flex: 1">
-              <div
-                style="
-                  font-family: var(--mono);
-                  font-size: 0.7rem;
-                  color: var(--muted);
-                "
-              >
-                <a
-                  href="/profile/{{ c.username }}"
-                  style="color: var(--ink); text-decoration: none"
-                  >{{ c.username }}</a
-                >
-                · {{ c.created[:10] }} {% if c.user_id == me.id %} ·
-                <form
-                  method="post"
-                  action="/delete-comment/{{ c.id }}"
-                  style="display: inline"
-                >
-                  <button
-                    type="submit"
-                    style="
-                      background: none;
-                      border: none;
-                      color: var(--accent);
-                      font-family: var(--mono);
-                      font-size: 0.68rem;
-                      cursor: pointer;
-                      padding: 0;
-                    "
-                  >
-                    delete
-                  </button>
-                </form>
-                {% endif %}
-              </div>
-              <p style="font-size: 0.85rem; margin-top: 0.2rem">{{ c.body }}</p>
-            </div>
+  <div style="display:flex;flex-direction:column;gap:0.5rem;">
+    {% for r in reviews %}
+      {% if not my_review or r.id != my_review.id %}
+      <div class="review-row" id="al-review-{{ r.id }}">
+        <div class="review-row-header" onclick="toggleReview('al', {{ r.id }})"
+             style="display:flex;align-items:center;gap:1rem;padding:0.75rem 1rem;
+                    background:var(--card);border:1px solid var(--border);
+                    cursor:pointer;transition:border-color 0.15s;"
+             onmouseover="this.style.borderColor='var(--accent)'"
+             onmouseout="this.style.borderColor='var(--border)'">
+          <div class="avatar-circle" style="width:32px;height:32px;font-size:0.85rem;flex-shrink:0;">
+            {{ r.username[0].upper() }}
           </div>
-          {% endfor %}
+          <div style="flex:1;min-width:0;">
+            <a href="/profile/{{ r.username }}"
+               style="font-family:var(--mono);font-size:0.8rem;font-weight:500;color:var(--ink);text-decoration:none;"
+               onclick="event.stopPropagation()">{{ r.username }}</a>
+          </div>
+          <div style="flex-shrink:0;" data-stars="{{ r.rating }}"></div>
+          <div style="font-family:var(--mono);font-size:0.68rem;color:var(--muted);flex-shrink:0;">
+            {{ r.created[:10] }}
+          </div>
+          {% set rev_comments = comments.get(r.id, []) %}
+          {% if rev_comments %}
+          <div style="font-family:var(--mono);font-size:0.68rem;color:var(--muted);flex-shrink:0;">
+            💬 {{ rev_comments|length }}
+          </div>
+          {% endif %}
+          <div class="review-chevron" style="font-size:1rem;color:var(--muted);flex-shrink:0;transition:transform 0.2s;">›</div>
         </div>
-        {% endif %}
 
-        <div
-          style="
-            margin-top: 0.85rem;
-            padding-top: 0.85rem;
-            border-top: 1px solid var(--border);
-          "
-        >
-          <button
-            onclick="toggleReply('al', {{ r.id }})"
-            style="
-              background: none;
-              border: none;
-              font-family: var(--mono);
-              font-size: 0.72rem;
-              color: var(--muted);
-              cursor: pointer;
-              padding: 0;
-              letter-spacing: 0.05em;
-            "
-          >
-            ↩ Reply
-          </button>
-          <form
-            method="post"
-            action="/comment/{{ r.id }}"
-            id="al-reply-{{ r.id }}"
-            style="
-              display: none;
-              margin-top: 0.6rem;
-              flex-direction: row;
-              gap: 0.75rem;
-            "
-          >
-            <input
-              type="text"
-              name="body"
-              placeholder="Write a reply…"
-              style="flex: 1; padding: 0.5rem 0.75rem; font-size: 0.85rem"
-            />
-            <button
-              type="submit"
-              class="btn"
-              style="padding: 0.5rem 1rem; font-size: 0.72rem"
-            >
-              Post
+        <div class="review-row-body" style="display:none;padding:1rem 1.25rem;
+             background:var(--card);border:1px solid var(--border);border-top:none;">
+          <p style="font-size:0.875rem;color:#3a3530;line-height:1.65;">{{ r.body }}</p>
+
+          {% set rev_comments = comments.get(r.id, []) %}
+          {% if rev_comments %}
+          <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);">
+            {% for c in rev_comments %}
+            <div style="display:flex;gap:0.75rem;margin-bottom:0.75rem;align-items:flex-start;">
+              <div class="avatar-circle" style="width:26px;height:26px;font-size:0.72rem;flex-shrink:0;">
+                {{ c.username[0].upper() }}
+              </div>
+              <div style="flex:1;">
+                <div style="font-family:var(--mono);font-size:0.7rem;color:var(--muted);">
+                  <a href="/profile/{{ c.username }}" style="color:var(--ink);text-decoration:none;">{{ c.username }}</a>
+                  · {{ c.created[:10] }}
+                  {% if c.user_id == me.id %}
+                    · <form method="post" action="/delete-comment/{{ c.id }}" style="display:inline;">
+                        <button type="submit" style="background:none;border:none;color:var(--accent);font-family:var(--mono);font-size:0.68rem;cursor:pointer;padding:0;">delete</button>
+                      </form>
+                  {% endif %}
+                </div>
+                <p style="font-size:0.85rem;margin-top:0.2rem;">{{ c.body }}</p>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+
+          <div style="margin-top:0.85rem;padding-top:0.85rem;border-top:1px solid var(--border);">
+            <button onclick="toggleReply('al', {{ r.id }})"
+                    style="background:none;border:none;font-family:var(--mono);font-size:0.72rem;
+                           color:var(--muted);cursor:pointer;padding:0;letter-spacing:0.05em;">
+              ↩ Reply
             </button>
-          </form>
+            <form method="post" action="/comment/{{ r.id }}"
+                  id="al-reply-{{ r.id }}"
+                  style="display:none;margin-top:0.6rem;flex-direction:row;gap:0.75rem;">
+              <input type="text" name="body" placeholder="Write a reply…"
+                     style="flex:1;padding:0.5rem 0.75rem;font-size:0.85rem;">
+              <button type="submit" class="btn" style="padding:0.5rem 1rem;font-size:0.72rem;">Post</button>
+            </form>
+          </div>
         </div>
       </div>
-    </div>
-    {% endif %} {% endfor %}
-  </div>
-  {% else %} {% if my_review %}
-  <div class="empty">
-    <div class="big">📝</div>
-    No other reviews yet.
+      {% endif %}
+    {% endfor %}
   </div>
   {% else %}
-  <div class="empty">
-    <div class="big">📝</div>
-    No reviews yet.
-  </div>
-  {% endif %} {% endif %}
+    {% if my_review %}
+      <div class="empty"><div class="big">📝</div>No other reviews yet.</div>
+    {% else %}
+      <div class="empty"><div class="big">📝</div>No reviews yet.</div>
+    {% endif %}
+  {% endif %}
+
 </div>
-{% endblock %} {% block scripts %}
+{% endblock %}
+
+{% block scripts %}
 <script>
-  // Spotify: on mobile try to open the app via URI scheme,
-  // fall back to web URL after a short delay if app not installed
-  document.addEventListener("DOMContentLoaded", function () {
-    const link = document.getElementById("spotify-link");
-    if (!link) return;
-    const webUrl = link.href;
-    const appUri = link.getAttribute("data-app-uri");
-    if (!appUri) return;
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    if (isMobile) {
-      link.addEventListener("click", function (e) {
-        e.preventDefault();
-        // Try to open the app
-        window.location = appUri;
-        // Fall back to web after 1.5s if app didn't open
-        setTimeout(function () {
-          window.open(webUrl, "_blank");
-        }, 1500);
-      });
-    }
-  });
-
-  function toggleExpando(btn) {
-    const body = btn.nextElementSibling;
-    const chevron = btn.querySelector(".expando-chevron");
-    const open = body.style.display !== "none";
-    body.style.display = open ? "none" : "block";
-    chevron.style.transform = open ? "" : "rotate(90deg)";
+// Spotify: on mobile try to open the app via URI scheme,
+// fall back to web URL after a short delay if app not installed
+document.addEventListener('DOMContentLoaded', function() {
+  const link = document.getElementById('spotify-link');
+  if (!link) return;
+  const webUrl = link.href;
+  const appUri = link.getAttribute('data-app-uri');
+  if (!appUri) return;
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  if (isMobile) {
+    link.addEventListener('click', function(e) {
+      e.preventDefault();
+      // Try to open the app
+      window.location = appUri;
+      // Fall back to web after 1.5s if app didn't open
+      setTimeout(function() { window.open(webUrl, '_blank'); }, 1500);
+    });
   }
+});
 
-  function toggleWriteReview() {
-    const form = document.getElementById("inline-review-form");
-    const btn = document.getElementById("write-btn");
-    const open = form.style.display !== "none";
-    form.style.display = open ? "none" : "block";
-    if (btn) btn.textContent = open ? "+ Review this album" : "✕ Cancel";
-    if (!open) form.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }
+function toggleEditReview() {
+  const view = document.getElementById('my-review-view');
+  const edit = document.getElementById('my-review-edit');
+  const editing = edit.style.display !== 'none';
+  view.style.display = editing ? 'block' : 'none';
+  edit.style.display = editing ? 'none'  : 'block';
+  if (!editing) edit.querySelector('textarea').focus();
+}
 
-  function toggleReview(prefix, id) {
-    const wrap = document.getElementById(prefix + "-review-" + id);
-    const header = wrap.querySelector(".review-row-header");
-    const body = wrap.querySelector(".review-row-body");
-    const chevron = wrap.querySelector(".review-chevron");
-    const open = body.style.display !== "none";
-    body.style.display = open ? "none" : "block";
-    chevron.style.transform = open ? "" : "rotate(90deg)";
-    header.style.borderColor = open ? "var(--border)" : "var(--accent)";
-    header.onmouseout = open
-      ? () => (header.style.borderColor = "var(--border)")
-      : null;
-  }
+function toggleExpando(btn) {
+  const body    = btn.nextElementSibling;
+  const chevron = btn.querySelector('.expando-chevron');
+  const open    = body.style.display !== 'none';
+  body.style.display      = open ? 'none' : 'block';
+  chevron.style.transform = open ? '' : 'rotate(90deg)';
+}
 
-  function toggleReply(prefix, id) {
-    const form = document.getElementById(prefix + "-reply-" + id);
-    const show = form.style.display === "none" || !form.style.display;
-    form.style.display = show ? "flex" : "none";
-    if (show) form.querySelector("input").focus();
-  }
+function toggleWriteReview() {
+  const form = document.getElementById('inline-review-form');
+  const btn  = document.getElementById('write-btn');
+  const open = form.style.display !== 'none';
+  form.style.display = open ? 'none' : 'block';
+  if (btn) btn.textContent = open ? '+ Review this album' : '✕ Cancel';
+  if (!open) form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function toggleReview(prefix, id) {
+  const wrap    = document.getElementById(prefix + '-review-' + id);
+  const header  = wrap.querySelector('.review-row-header');
+  const body    = wrap.querySelector('.review-row-body');
+  const chevron = wrap.querySelector('.review-chevron');
+  const open    = body.style.display !== 'none';
+  body.style.display       = open ? 'none' : 'block';
+  chevron.style.transform  = open ? '' : 'rotate(90deg)';
+  header.style.borderColor = open ? 'var(--border)' : 'var(--accent)';
+  header.onmouseout = open ? () => header.style.borderColor = 'var(--border)' : null;
+}
+
+function toggleReply(prefix, id) {
+  const form = document.getElementById(prefix + '-reply-' + id);
+  const show = form.style.display === 'none' || !form.style.display;
+  form.style.display = show ? 'flex' : 'none';
+  if (show) form.querySelector('input').focus();
+}
 </script>
 
 <style>
-  .expando-trigger {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.65rem 1rem;
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 2px;
-    cursor: pointer;
-    font-family: var(--mono);
-    font-size: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--ink);
-    transition: border-color 0.15s;
-  }
-  .expando-trigger:hover {
-    border-color: var(--accent);
-  }
-  .expando-chevron {
-    font-size: 1.1rem;
-    color: var(--muted);
-    transition: transform 0.2s;
-  }
+.expando-trigger {
+  width:100%;display:flex;align-items:center;justify-content:space-between;
+  padding:0.65rem 1rem;background:var(--card);border:1px solid var(--border);
+  border-radius:2px;cursor:pointer;font-family:var(--mono);font-size:0.75rem;
+  text-transform:uppercase;letter-spacing:0.08em;color:var(--ink);
+  transition:border-color 0.15s;
+}
+.expando-trigger:hover { border-color:var(--accent); }
+.expando-chevron { font-size:1.1rem;color:var(--muted);transition:transform 0.2s; }
 </style>
 {% endblock %}
