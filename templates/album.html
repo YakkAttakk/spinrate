@@ -23,6 +23,23 @@
       {% else %}
         <div style="width:100%;height:100%;background:var(--cream);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:4rem;box-shadow:4px 4px 0 var(--ink);">🎵</div>
       {% endif %}
+      <!-- Art controls -->
+      <div style="display:flex;gap:0.4rem;margin-top:0.5rem;flex-wrap:wrap;">
+        {% if album.cover_url %}
+          <form method="post" action="/album/{{ album.id }}/clear-art" style="display:inline;">
+            <button type="submit" class="btn btn-outline"
+                    style="font-size:0.65rem;padding:0.25rem 0.6rem;border-color:var(--border);">
+              ✕ Remove art
+            </button>
+          </form>
+        {% endif %}
+        <form method="post" action="/album/{{ album.id }}/refetch-art" style="display:inline;">
+          <button type="submit" class="btn btn-outline"
+                  style="font-size:0.65rem;padding:0.25rem 0.6rem;border-color:var(--border);">
+            ↺ Refetch art
+          </button>
+        </form>
+      </div>
     </div>
 
     <div>

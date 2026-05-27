@@ -1367,6 +1367,35 @@ def review_album(album_id):
         commit()
     return redirect(url_for('album', album_id=album_id))
 
+@app.route('/album/<int:album_id>/clear-art', methods=['POST'])
+@login_required
+def clear_art(album_id):
+    execute("UPDATE albums SET cover_url=NULL WHERE id=?", (album_id,))
+    commit()
+    return redirect(url_for('album', album_id=album_id))
+
+@app.route('/album/<int:album_id>/refetch-art', methods=['POST'])
+@login_required
+def refetch_art(album_id):
+    al = query("""
+        SELECT al.*, ar.name as artist_name
+        FROM albums al JOIN artists ar ON ar.id = al.artist_id
+        WHERE al.id = ?
+    """, (album_id,), one=True)
+    if not al:
+        abort(404)
+    # Clear current art then run the full fetch chain
+    execute("UPDATE albums SET cover_url=NULL WHERE id=?", (album_id,))
+    commit()
+    try:
+        art = fetch_cover_art(al['mb_id'], al['artist_name'], al['title'], al['wiki_url'])
+        if art:
+            execute("UPDATE albums SET cover_url=? WHERE id=?", (art, album_id))
+            commit()
+    except Exception:
+        pass
+    return redirect(url_for('album', album_id=album_id))
+
 @app.route('/edit-review/<int:review_id>', methods=['POST'])
 @login_required
 def edit_review(review_id):
