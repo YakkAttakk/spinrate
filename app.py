@@ -798,20 +798,88 @@ def fetch_critical_reception(wiki_url):
             return None
 
         # ----------------------------------------------------------------
+        # Score a heading to find the best reception/legacy section
+        # ----------------------------------------------------------------
+        def score_heading(heading):
+            """Return a relevance score for how likely this is the reception section."""
+            h = heading.lower().strip()
+            score = 0
+            # Strong positive signals
+            if 'reception' in h:    score += 10
+            if 'review' in h:       score += 8
+            if 'critical' in h:     score += 6
+            if 'legacy' in h:       score += 5
+            if 'acclaim' in h:      score += 5
+            if 'response' in h:     score += 4
+            if 'impact' in h:       score += 3
+            if 'influence' in h:    score += 3
+            if 'assessment' in h:   score += 3
+            if 'commercial' in h:   score += 2
+            if 'performance' in h:  score += 2
+            if 'release' in h:      score += 1
+            # Negative signals — skip these even if they contain some positive words
+            if 'track' in h:        score -= 20
+            if 'personnel' in h:    score -= 20
+            if 'background' in h:   score -= 10
+            if 'recording' in h:    score -= 10
+            if 'artwork' in h:      score -= 10
+            if 'chart' in h and score < 5: score -= 5
+            return score
+
+        # ----------------------------------------------------------------
+        # Pre-scan: collect all headings and find the best reception section
+        # ----------------------------------------------------------------
+        class HeadingScanner(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.headings = []   # list of (heading_text, level)
+                self.in_heading = False
+                self.current_text = ''
+                self.current_level = 0
+
+            def handle_starttag(self, tag, attrs):
+                if tag in ('h2', 'h3', 'h4'):
+                    self.in_heading = True
+                    self.current_text = ''
+                    self.current_level = int(tag[1])
+
+            def handle_endtag(self, tag):
+                if tag in ('h2', 'h3', 'h4') and self.in_heading:
+                    self.in_heading = False
+                    text = self.current_text.strip()
+                    if text:
+                        self.headings.append((text, self.current_level))
+
+            def handle_data(self, data):
+                if self.in_heading:
+                    self.current_text += data
+
+        heading_scanner = HeadingScanner()
+        heading_scanner.feed(html)
+
+        # Pick the heading with the best score (must be > 0)
+        best_heading = None
+        best_score   = 0
+        for heading_text, _ in heading_scanner.headings:
+            s = score_heading(heading_text)
+            if s > best_score:
+                best_score   = s
+                best_heading = heading_text.strip()
+
+        if not best_heading:
+            return None
+
+        # ----------------------------------------------------------------
         # Pass 2: parse review table and prose
         # ----------------------------------------------------------------
         class ReceptionParser(HTMLParser):
-            def __init__(self):
+            def __init__(self, target_heading):
                 super().__init__()
                 self.reviews = []
                 self.summary_paragraphs = []
+                self.target_heading  = target_heading.lower().strip()
 
                 self.in_reception  = False
-                self.reception_kw  = {
-                    'critical reception', 'critical response', 'reception',
-                    'reviews', 'critical acclaim',
-                    'commercial performance and critical reception'
-                }
                 self.pending_heading = False
                 self.heading_text    = ''
                 self.depth           = 0
@@ -843,9 +911,6 @@ def fetch_critical_reception(wiki_url):
                 if tag in ('h2', 'h3', 'h4'):
                     self.pending_heading = True
                     self.heading_text    = ''
-
-                if self.in_reception and tag == 'h2':
-                    self.in_reception = False
 
                 if self.in_reception:
                     # Allow multiple wikitables (some albums have split tables)
@@ -917,8 +982,10 @@ def fetch_critical_reception(wiki_url):
 
                 if tag in ('h2', 'h3', 'h4'):
                     heading = self.heading_text.lower().strip()
-                    if any(k in heading for k in self.reception_kw):
+                    if heading == self.target_heading:
                         self.in_reception = True
+                    elif self.in_reception and tag in ('h2', 'h3'):
+                        self.in_reception = False
                     self.pending_heading = False
 
                 if not self.in_reception:
@@ -991,7 +1058,7 @@ def fetch_critical_reception(wiki_url):
                 if self.in_para and not self.in_table:
                     self.current_para += data
 
-        parser = ReceptionParser()
+        parser = ReceptionParser(best_heading)
         parser.feed(html)
 
         prose = ''
