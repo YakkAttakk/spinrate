@@ -194,85 +194,6 @@
   </div>
   {% endif %}
 
-  <!-- My review banner -->
-  {% if my_review %}
-  <div class="card" style="background:var(--cream);border-color:var(--gold);margin-bottom:1rem;">
-
-    <!-- View mode -->
-    <div id="my-review-view">
-      <div class="flex justify-between items-center wrap gap2">
-        <div>
-          <div class="text-mono text-muted" style="font-size:0.7rem;margin-bottom:0.3rem;">Your review</div>
-          <div data-stars="{{ my_review.rating }}"></div>
-          <p style="font-size:0.875rem;margin-top:0.4rem;" id="my-review-body">{{ my_review.body }}</p>
-        </div>
-        <div style="display:flex;gap:0.5rem;flex-shrink:0;">
-          <button onclick="toggleEditReview()" class="btn btn-outline"
-                  style="font-size:0.72rem;padding:0.4rem 0.9rem;">Edit</button>
-          <form method="post" action="/delete-review/{{ my_review.id }}"
-                onsubmit="return confirm('Delete your review?')" style="display:inline;">
-            <button type="submit" class="btn btn-danger"
-                    style="font-size:0.72rem;padding:0.4rem 0.9rem;">Delete</button>
-          </form>
-        </div>
-      </div>
-    </div>
-
-    <!-- Edit mode (hidden by default) -->
-    <div id="my-review-edit" style="display:none;">
-      <div class="text-mono text-muted" style="font-size:0.7rem;margin-bottom:0.75rem;">Edit your review</div>
-      <form method="post" action="/edit-review/{{ my_review.id }}">
-        <div class="form-group">
-          <label>Rating</label>
-          <div class="star-picker">
-            <input type="radio" name="rating" id="er5" value="5" {% if my_review.rating == 5 %}checked{% endif %}><label for="er5">★</label>
-            <input type="radio" name="rating" id="er4" value="4" {% if my_review.rating == 4 %}checked{% endif %}><label for="er4">★</label>
-            <input type="radio" name="rating" id="er3" value="3" {% if my_review.rating == 3 %}checked{% endif %}><label for="er3">★</label>
-            <input type="radio" name="rating" id="er2" value="2" {% if my_review.rating == 2 %}checked{% endif %}><label for="er2">★</label>
-            <input type="radio" name="rating" id="er1" value="1" {% if my_review.rating == 1 %}checked{% endif %}><label for="er1">★</label>
-          </div>
-        </div>
-        <div class="form-group">
-          <label>Review</label>
-          <textarea name="body" rows="4" required>{{ my_review.body }}</textarea>
-        </div>
-        <div style="display:flex;gap:0.75rem;">
-          <button type="submit" class="btn">Save</button>
-          <button type="button" class="btn btn-outline" onclick="toggleEditReview()">Cancel</button>
-        </div>
-      </form>
-    </div>
-    {% set my_comments = comments.get(my_review.id, []) %}
-    {% if my_comments %}
-      <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);">
-        {% for c in my_comments %}
-          <div style="display:flex;gap:0.75rem;margin-bottom:0.75rem;align-items:flex-start;">
-            <div class="avatar-circle" style="width:28px;height:28px;font-size:0.75rem;flex-shrink:0;">{{ c.username[0].upper() }}</div>
-            <div style="flex:1;">
-              <div style="font-family:var(--mono);font-size:0.7rem;color:var(--muted);">
-                <a href="/profile/{{ c.username }}" style="color:var(--ink);text-decoration:none;">{{ c.username }}</a>
-                · {{ c.created[:10] }}
-                {% if c.user_id == me.id %}
-                  · <form method="post" action="/delete-comment/{{ c.id }}" style="display:inline;">
-                      <button type="submit" style="background:none;border:none;color:var(--accent);font-family:var(--mono);font-size:0.68rem;cursor:pointer;padding:0;">delete</button>
-                    </form>
-                {% endif %}
-              </div>
-              <p style="font-size:0.85rem;margin-top:0.2rem;">{{ c.body }}</p>
-            </div>
-          </div>
-        {% endfor %}
-      </div>
-    {% endif %}
-    <form method="post" action="/comment/{{ my_review.id }}"
-          style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);display:flex;gap:0.75rem;">
-      <input type="text" name="body" placeholder="Reply to your own review…"
-             style="flex:1;padding:0.5rem 0.75rem;font-size:0.85rem;">
-      <button type="submit" class="btn" style="padding:0.5rem 1rem;font-size:0.72rem;">Reply</button>
-    </form>
-  </div>
-  {% endif %}
-
   <!-- Reviews header + inline write form -->
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;gap:1rem;flex-wrap:wrap;">
     <h2 style="font-family:var(--serif);font-size:1.4rem;">
@@ -313,8 +234,126 @@
   {% endif %}
 
   <!-- Review list -->
-  {% if reviews %}
+  {% if reviews or my_review %}
   <div style="display:flex;flex-direction:column;gap:0.5rem;">
+
+    {% if my_review %}
+    <!-- My review — first in list, gold-accented -->
+    <div id="al-review-{{ my_review.id }}"
+         style="border:2px solid var(--gold);border-radius:2px;overflow:hidden;">
+      <!-- Collapsed header -->
+      <div class="review-row-header" onclick="toggleReview('al', {{ my_review.id }})"
+           style="display:flex;align-items:center;gap:1rem;padding:0.75rem 1rem;
+                  background:var(--cream);cursor:pointer;transition:background 0.15s;"
+           onmouseover="this.style.background='#ede0c0'"
+           onmouseout="this.style.background='var(--cream)'">
+        <div class="avatar-circle" style="width:32px;height:32px;font-size:0.85rem;flex-shrink:0;border-color:var(--gold);">
+          {{ me.username[0].upper() }}
+        </div>
+        <div style="flex:1;min-width:0;">
+          <span style="font-family:var(--mono);font-size:0.8rem;font-weight:500;">{{ me.username }}</span>
+          <span style="font-family:var(--mono);font-size:0.68rem;color:var(--gold);margin-left:0.5rem;">your review</span>
+        </div>
+        <div style="flex-shrink:0;" data-stars="{{ my_review.rating }}"></div>
+        <div style="font-family:var(--mono);font-size:0.68rem;color:var(--muted);flex-shrink:0;">
+          {{ my_review.created[:10] }}
+        </div>
+        {% set my_comments = comments.get(my_review.id, []) %}
+        {% if my_comments %}
+        <div style="font-family:var(--mono);font-size:0.68rem;color:var(--muted);flex-shrink:0;">
+          💬 {{ my_comments|length }}
+        </div>
+        {% endif %}
+        <div class="review-chevron" style="font-size:1rem;color:var(--muted);flex-shrink:0;transition:transform 0.2s;">›</div>
+      </div>
+
+      <!-- Expanded body -->
+      <div class="review-row-body" style="display:none;padding:1rem 1.25rem;
+           background:var(--cream);border-top:1px solid var(--border);">
+
+        <!-- View mode -->
+        <div id="my-review-view">
+          <p style="font-size:0.875rem;color:#3a3530;line-height:1.65;">{{ my_review.body }}</p>
+          <div style="display:flex;gap:0.5rem;margin-top:0.75rem;">
+            <button onclick="toggleEditReview()" class="btn btn-outline"
+                    style="font-size:0.7rem;padding:0.3rem 0.8rem;">Edit</button>
+            <form method="post" action="/delete-review/{{ my_review.id }}"
+                  onsubmit="return confirm('Delete your review?')" style="display:inline;">
+              <button type="submit" class="btn btn-danger"
+                      style="font-size:0.7rem;padding:0.3rem 0.8rem;">Delete</button>
+            </form>
+          </div>
+        </div>
+
+        <!-- Edit mode -->
+        <div id="my-review-edit" style="display:none;">
+          <form method="post" action="/edit-review/{{ my_review.id }}">
+            <div class="form-group">
+              <label>Rating</label>
+              <div class="star-picker">
+                <input type="radio" name="rating" id="er5" value="5" {% if my_review.rating == 5 %}checked{% endif %}><label for="er5">★</label>
+                <input type="radio" name="rating" id="er4" value="4" {% if my_review.rating == 4 %}checked{% endif %}><label for="er4">★</label>
+                <input type="radio" name="rating" id="er3" value="3" {% if my_review.rating == 3 %}checked{% endif %}><label for="er3">★</label>
+                <input type="radio" name="rating" id="er2" value="2" {% if my_review.rating == 2 %}checked{% endif %}><label for="er2">★</label>
+                <input type="radio" name="rating" id="er1" value="1" {% if my_review.rating == 1 %}checked{% endif %}><label for="er1">★</label>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Review</label>
+              <textarea name="body" rows="4" required>{{ my_review.body }}</textarea>
+            </div>
+            <div style="display:flex;gap:0.75rem;">
+              <button type="submit" class="btn">Save</button>
+              <button type="button" class="btn btn-outline" onclick="toggleEditReview()">Cancel</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Comments -->
+        {% set my_comments = comments.get(my_review.id, []) %}
+        {% if my_comments %}
+        <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);">
+          {% for c in my_comments %}
+          <div style="display:flex;gap:0.75rem;margin-bottom:0.75rem;align-items:flex-start;">
+            <div class="avatar-circle" style="width:26px;height:26px;font-size:0.72rem;flex-shrink:0;">
+              {{ c.username[0].upper() }}
+            </div>
+            <div style="flex:1;">
+              <div style="font-family:var(--mono);font-size:0.7rem;color:var(--muted);">
+                <a href="/profile/{{ c.username }}" style="color:var(--ink);text-decoration:none;">{{ c.username }}</a>
+                · {{ c.created[:10] }}
+                {% if c.user_id == me.id %}
+                  · <form method="post" action="/delete-comment/{{ c.id }}" style="display:inline;">
+                      <button type="submit" style="background:none;border:none;color:var(--accent);font-family:var(--mono);font-size:0.68rem;cursor:pointer;padding:0;">delete</button>
+                    </form>
+                {% endif %}
+              </div>
+              <p style="font-size:0.85rem;margin-top:0.2rem;">{{ c.body }}</p>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        <!-- Reply -->
+        <div style="margin-top:0.85rem;padding-top:0.85rem;border-top:1px solid var(--border);">
+          <button onclick="toggleReply('al', {{ my_review.id }})"
+                  style="background:none;border:none;font-family:var(--mono);font-size:0.72rem;
+                         color:var(--muted);cursor:pointer;padding:0;letter-spacing:0.05em;">
+            ↩ Reply
+          </button>
+          <form method="post" action="/comment/{{ my_review.id }}"
+                id="al-reply-{{ my_review.id }}"
+                style="display:none;margin-top:0.6rem;flex-direction:row;gap:0.75rem;">
+            <input type="text" name="body" placeholder="Add a note…"
+                   style="flex:1;padding:0.5rem 0.75rem;font-size:0.85rem;">
+            <button type="submit" class="btn" style="padding:0.5rem 1rem;font-size:0.72rem;">Post</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
     {% for r in reviews %}
       {% if not my_review or r.id != my_review.id %}
       <div class="review-row" id="al-review-{{ r.id }}">
@@ -394,11 +433,7 @@
     {% endfor %}
   </div>
   {% else %}
-    {% if my_review %}
-      <div class="empty"><div class="big">📝</div>No other reviews yet.</div>
-    {% else %}
-      <div class="empty"><div class="big">📝</div>No reviews yet.</div>
-    {% endif %}
+    <div class="empty"><div class="big">📝</div>No reviews yet.</div>
   {% endif %}
 
 </div>
