@@ -1437,3 +1437,81 @@ def refetch_artist_wiki(artist_id):
     commit()
     try:
         wiki_url, wiki_summary = wikipedia_info(a['name'])
+        if wiki_url or wiki_summary:
+            execute("UPDATE artists SET wiki_url=?, wiki_summary=? WHERE id=?",
+                    (wiki_url, wiki_summary, artist_id))
+            commit()
+    except Exception:
+        pass
+    return redirect(url_for('artist', artist_id=artist_id))
+
+@app.route('/edit-review/<int:review_id>', methods=['POST'])
+@login_required
+def edit_review(review_id):
+    me  = current_user()
+    rev = query("SELECT * FROM reviews WHERE id=?", (review_id,), one=True)
+    if not rev or rev['user_id'] != me['id']:
+        abort(403)
+    rating = request.form.get('rating', '').strip()
+    body   = request.form.get('body',   '').strip()
+    if rating and body:
+        execute("UPDATE reviews SET rating=?, body=?, created=? WHERE id=?",
+                (int(rating), body,
+                 datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+                 review_id))
+        commit()
+    return redirect(request.referrer or url_for('album', album_id=rev['album_id']))
+
+@app.route('/delete-review/<int:review_id>', methods=['POST'])
+@login_required
+def delete_review(review_id):
+    me  = current_user()
+    rev = query("SELECT * FROM reviews WHERE id=?", (review_id,), one=True)
+    if rev and rev['user_id'] == me['id']:
+        execute("DELETE FROM reviews WHERE id=?", (review_id,))
+        commit()
+    return redirect(request.referrer or url_for('home'))
+
+@app.route('/members')
+@login_required
+def members():
+    me    = current_user()
+    users = query("""
+        SELECT u.*, COUNT(r.id) as review_count
+        FROM users u LEFT JOIN reviews r ON r.user_id = u.id
+        GROUP BY u.id ORDER BY u.username
+    """)
+    return render_template('members.html', me=me, users=users)
+
+@app.route('/comment/<int:review_id>', methods=['POST'])
+@login_required
+def add_comment(review_id):
+    me   = current_user()
+    body = request.form.get('body', '').strip()
+    if body:
+        rev = query("SELECT album_id FROM reviews WHERE id=?", (review_id,), one=True)
+        if rev:
+            execute("INSERT INTO comments (review_id, user_id, body) VALUES (?,?,?)",
+                    (review_id, me['id'], body))
+            commit()
+            return redirect(url_for('album', album_id=rev['album_id']) + f'#review-{review_id}')
+    return redirect(request.referrer or url_for('home'))
+
+@app.route('/delete-comment/<int:comment_id>', methods=['POST'])
+@login_required
+def delete_comment(comment_id):
+    me  = current_user()
+    c   = query("SELECT * FROM comments WHERE id=?", (comment_id,), one=True)
+    if c and c['user_id'] == me['id']:
+        execute("DELETE FROM comments WHERE id=?", (comment_id,))
+        commit()
+    return redirect(request.referrer or url_for('home'))
+
+# ---------------------------------------------------------------------------
+# Init DB and run
+# ---------------------------------------------------------------------------
+
+init_db()
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5001, debug=False)
