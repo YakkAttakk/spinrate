@@ -14,26 +14,28 @@
     }
   </style>
   <div class="album-header">
-    <div class="album-cover">
-      {% if album.cover_url %}
-        <img src="{{ album.cover_url }}" alt="{{ album.title }}"
-             style="width:100%;height:100%;object-fit:cover;border:1px solid var(--border);box-shadow:4px 4px 0 var(--ink);"
-             onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
-        <div style="display:none;width:100%;height:100%;background:var(--cream);border:1px solid var(--border);align-items:center;justify-content:center;font-size:4rem;box-shadow:4px 4px 0 var(--ink);">🎵</div>
-      {% else %}
-        <div style="width:100%;height:100%;background:var(--cream);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:4rem;box-shadow:4px 4px 0 var(--ink);">🎵</div>
-      {% endif %}
-      <!-- Art controls -->
-      <div style="display:flex;gap:0.4rem;margin-top:0.5rem;flex-wrap:wrap;">
+    <div>
+      <div class="album-cover">
         {% if album.cover_url %}
-          <form method="post" action="/album/{{ album.id }}/clear-art" style="display:inline;">
+          <img src="{{ album.cover_url }}" alt="{{ album.title }}"
+               style="width:100%;height:100%;object-fit:cover;border:1px solid var(--border);box-shadow:4px 4px 0 var(--ink);"
+               onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+          <div style="display:none;width:100%;height:100%;background:var(--cream);border:1px solid var(--border);align-items:center;justify-content:center;font-size:4rem;box-shadow:4px 4px 0 var(--ink);">🎵</div>
+        {% else %}
+          <div style="width:100%;height:100%;background:var(--cream);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:4rem;box-shadow:4px 4px 0 var(--ink);">🎵</div>
+        {% endif %}
+      </div>
+      <!-- Art controls — outside the fixed-size cover box -->
+      <div style="display:flex;gap:0.4rem;margin-top:0.6rem;flex-wrap:wrap;">
+        {% if album.cover_url %}
+          <form method="post" action="/album/{{ album.id }}/clear-art">
             <button type="submit" class="btn btn-outline"
                     style="font-size:0.65rem;padding:0.25rem 0.6rem;border-color:var(--border);">
               ✕ Remove art
             </button>
           </form>
         {% endif %}
-        <form method="post" action="/album/{{ album.id }}/refetch-art" style="display:inline;">
+        <form method="post" action="/album/{{ album.id }}/refetch-art">
           <button type="submit" class="btn btn-outline"
                   style="font-size:0.65rem;padding:0.25rem 0.6rem;border-color:var(--border);">
             ↺ Refetch art
