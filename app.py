@@ -444,11 +444,13 @@ def album_wikipedia_info(artist_name, album_title):
         if re.search(r'\(.*ep\)|\(.*single\)|\(.*soundtrack\)', title_l):
             score += 8
 
-        # Album title match in page title
+        # Album title match in page title — hard penalty if not present
         if album_l in title_l:
             score += 5
         elif any(w in title_l for w in album_l.split() if len(w) > 3):
             score += 2
+        else:
+            score -= 50
 
         # Artist name in page title (e.g. "Rumours (Fleetwood Mac album)")
         if artist_l in title_l:
