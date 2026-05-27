@@ -1403,20 +1403,37 @@ def refetch_art(album_id):
         pass
     return redirect(url_for('album', album_id=album_id))
 
-@app.route('/edit-review/<int:review_id>', methods=['POST'])
+@app.route('/album/<int:album_id>/refetch-wiki', methods=['POST'])
 @login_required
-def edit_review(review_id):
-    me  = current_user()
-    rev = query("SELECT * FROM reviews WHERE id=?", (review_id,), one=True)
-    if not rev or rev['user_id'] != me['id']:
-        abort(403)
-    rating = request.form.get('rating', '').strip()
-    body   = request.form.get('body',   '').strip()
-    if rating and body:
-        execute("UPDATE reviews SET rating=?, body=?, created=? WHERE id=?",
-                (int(rating), body,
-                 datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
-                 review_id))
-        commit()
-    return redirect(request.referrer or url_for('album', album_id=rev['album_id']))
+def refetch_album_wiki(album_id):
+    al = query("""
+        SELECT al.*, ar.name as artist_name
+        FROM albums al JOIN artists ar ON ar.id = al.artist_id
+        WHERE al.id = ?
+    """, (album_id,), one=True)
+    if not al:
+        abort(404)
+    execute("UPDATE albums SET wiki_url=NULL, wiki_summary=NULL, wiki_infobox=NULL, wiki_reception=NULL WHERE id=?",
+            (album_id,))
+    commit()
+    try:
+        wiki_url, wiki_summary = album_wikipedia_info(al['artist_name'], al['title'])
+        if wiki_url or wiki_summary:
+            execute("UPDATE albums SET wiki_url=?, wiki_summary=? WHERE id=?",
+                    (wiki_url, wiki_summary, album_id))
+            commit()
+    except Exception:
+        pass
+    return redirect(url_for('album', album_id=album_id))
 
+@app.route('/artist/<int:artist_id>/refetch-wiki', methods=['POST'])
+@login_required
+def refetch_artist_wiki(artist_id):
+    a = query("SELECT * FROM artists WHERE id=?", (artist_id,), one=True)
+    if not a:
+        abort(404)
+    execute("UPDATE artists SET wiki_url=NULL, wiki_summary=NULL, wiki_infobox=NULL WHERE id=?",
+            (artist_id,))
+    commit()
+    try:
+        wiki_url, wiki_summary = wikipedia_info(a['name'])

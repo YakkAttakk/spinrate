@@ -98,7 +98,12 @@
 
       {% if album.wiki_summary %}
         <div style="margin-top:1rem;">
-          <div style="font-family:var(--mono);font-size:0.68rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:0.35rem;">About this album</div>
+          <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.35rem;">
+            <div style="font-family:var(--mono);font-size:0.68rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);">About this album</div>
+            <form method="post" action="/album/{{ album.id }}/refetch-wiki" style="display:inline;">
+              <button type="submit" style="background:none;border:none;font-family:var(--mono);font-size:0.65rem;color:var(--muted);cursor:pointer;padding:0;letter-spacing:0.04em;" title="Refetch from Wikipedia">↺ refetch</button>
+            </form>
+          </div>
           <p style="font-size:0.82rem;color:#4a4540;border-left:3px solid var(--gold);padding-left:0.75rem;line-height:1.55;">
             {{ album.wiki_summary }}
             {% if album.wiki_url %}
@@ -147,10 +152,15 @@
   <!-- Critical Reviews expando -->
   {% if reception %}
   <div class="expando" style="margin-bottom:1.5rem;">
-    <button class="expando-trigger" onclick="toggleExpando(this)">
-      <span>Critical Reviews</span>
-      <span class="expando-chevron">›</span>
-    </button>
+    <div style="display:flex;align-items:center;gap:0.5rem;">
+      <button class="expando-trigger" onclick="toggleExpando(this)" style="flex:1;">
+        <span>Critical Reviews</span>
+        <span class="expando-chevron">›</span>
+      </button>
+      <form method="post" action="/album/{{ album.id }}/refetch-wiki">
+        <button type="submit" style="background:none;border:none;font-family:var(--mono);font-size:0.65rem;color:var(--muted);cursor:pointer;padding:0 0.25rem;letter-spacing:0.04em;white-space:nowrap;" title="Refetch from Wikipedia">↺ refetch</button>
+      </form>
+    </div>
     <div class="expando-body" style="display:none;padding:1rem;background:var(--card);border:1px solid var(--border);border-top:none;">
       {% if reception.summary %}
         <p style="font-size:0.85rem;color:#3a3530;line-height:1.65;margin-bottom:{% if reception.reviews %}1.25rem{% else %}0{% endif %};">

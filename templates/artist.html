@@ -18,9 +18,21 @@
       <span class="badge text-muted">{{ albums|length }} album{{ 's' if albums|length != 1 }}</span>
     </div>
     {% if artist.wiki_summary %}
-      <p style="margin-top:1rem;max-width:640px;font-size:0.88rem;color:#4a4540;border-left:3px solid var(--gold);padding-left:1rem;">
-        {{ artist.wiki_summary }}
-      </p>
+      <div style="margin-top:1rem;max-width:640px;display:flex;align-items:flex-start;gap:0.75rem;">
+        <p style="font-size:0.88rem;color:#4a4540;border-left:3px solid var(--gold);padding-left:1rem;flex:1;">
+          {{ artist.wiki_summary }}
+        </p>
+        <form method="post" action="/artist/{{ artist.id }}/refetch-wiki" style="flex-shrink:0;margin-top:0.1rem;">
+          <button type="submit" style="background:none;border:none;font-family:var(--mono);font-size:0.65rem;color:var(--muted);cursor:pointer;padding:0;letter-spacing:0.04em;" title="Refetch from Wikipedia">↺ refetch</button>
+        </form>
+      </div>
+    {% endif %}
+    {% if not artist.wiki_summary and artist.wiki_url %}
+      <div style="margin-top:1rem;">
+        <form method="post" action="/artist/{{ artist.id }}/refetch-wiki" style="display:inline;">
+          <button type="submit" class="btn btn-outline" style="font-size:0.68rem;padding:0.3rem 0.75rem;">↺ Refetch description</button>
+        </form>
+      </div>
     {% endif %}
   </div>
 
