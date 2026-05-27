@@ -58,6 +58,15 @@
             </a>
           </div>
         </div>
+        <div class="cover-wrap">
+          {% if r.cover_url %}
+            <img class="cover" src="{{ r.cover_url }}" alt="{{ r.album_title }}" loading="lazy"
+                 onerror="this.parentElement.innerHTML='<div class=cover-placeholder>🎵</div>'">
+          {% else %}
+            <div class="cover-placeholder">🎵</div>
+          {% endif %}
+        </div>
+        </div>
       </div>
       {% endfor %}
     </div>

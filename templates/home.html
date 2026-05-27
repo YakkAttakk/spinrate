@@ -14,13 +14,6 @@
   <div class="feed">
     {% for r in reviews %}
     <div class="review-card">
-      {% if r.cover_url %}
-        <img class="cover" src="{{ r.cover_url }}" alt="{{ r.album_title }}" loading="lazy"
-             onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
-        <div class="cover-placeholder" style="display:none;">🎵</div>
-      {% else %}
-        <div class="cover-placeholder">🎵</div>
-      {% endif %}
       <div class="review-card-body">
         <div class="review-meta">
           <a href="/profile/{{ r.username }}">{{ r.username }}</a>
@@ -38,13 +31,21 @@
           <a href="/album/{{ r.album_id }}#al-review-{{ r.id }}"
              style="font-family:var(--mono);font-size:0.68rem;color:var(--muted);
                     border:1px solid var(--border);border-radius:2px;
-                    padding:0.2rem 0.55rem;text-decoration:none;
-                    transition:border-color 0.15s,color 0.15s;display:inline-block;"
+                    padding:0.2rem 0.55rem;text-decoration:none;display:inline-block;
+                    transition:border-color 0.15s,color 0.15s;"
              onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'"
              onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">
             Full review →
           </a>
         </div>
+      </div>
+      <div class="cover-wrap">
+        {% if r.cover_url %}
+          <img class="cover" src="{{ r.cover_url }}" alt="{{ r.album_title }}" loading="lazy"
+               onerror="this.parentElement.innerHTML='<div class=cover-placeholder>🎵</div>'">
+        {% else %}
+          <div class="cover-placeholder">🎵</div>
+        {% endif %}
       </div>
     </div>
     {% endfor %}
