@@ -117,6 +117,7 @@ def init_db():
                 mb_id        TEXT,
                 year         TEXT,
                 cover_url    TEXT,
+                cover_locked SMALLINT DEFAULT 0,
                 genre        TEXT,
                 wiki_url     TEXT,
                 wiki_summary TEXT,
@@ -174,9 +175,10 @@ def init_db():
                 title       TEXT    NOT NULL,
                 mb_id       TEXT,
                 year        TEXT,
-                cover_url   TEXT,
-                genre       TEXT,
-                wiki_url    TEXT,
+                cover_url    TEXT,
+                cover_locked INTEGER DEFAULT 0,
+                genre        TEXT,
+                wiki_url     TEXT,
                 wiki_summary TEXT,
                 wiki_infobox  TEXT,
                 wiki_reception TEXT,
@@ -1237,8 +1239,8 @@ def album(album_id):
         except Exception:
             pass
 
-    # Lazily fetch and cache cover art on first visit
-    if not al['cover_url']:
+    # Lazily fetch and cache cover art on first visit (skip if user removed it)
+    if not al['cover_url'] and not al['cover_locked']:
         try:
             art = fetch_cover_art(
                 al['mb_id'], al['artist_name'], al['title'], al['wiki_url'])
@@ -1405,7 +1407,7 @@ def review_album(album_id):
 @app.route('/album/<int:album_id>/clear-art', methods=['POST'])
 @login_required
 def clear_art(album_id):
-    execute("UPDATE albums SET cover_url=NULL WHERE id=?", (album_id,))
+    execute("UPDATE albums SET cover_url=NULL, cover_locked=1 WHERE id=?", (album_id,))
     commit()
     return redirect(url_for('album', album_id=album_id))
 
@@ -1419,8 +1421,8 @@ def refetch_art(album_id):
     """, (album_id,), one=True)
     if not al:
         abort(404)
-    # Clear current art then run the full fetch chain
-    execute("UPDATE albums SET cover_url=NULL WHERE id=?", (album_id,))
+    # Clear lock and current art, then run the full fetch chain
+    execute("UPDATE albums SET cover_url=NULL, cover_locked=0 WHERE id=?", (album_id,))
     commit()
     try:
         art = fetch_cover_art(al['mb_id'], al['artist_name'], al['title'], al['wiki_url'])
