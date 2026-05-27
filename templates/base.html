@@ -141,12 +141,16 @@
       align-self: stretch;
       overflow: hidden;
       background: var(--cream);
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
     .review-card .cover {
       width: 100px;
-      height: 100%;
+      height: 100px;
       object-fit: cover;
       display: block;
+      flex-shrink: 0;
     }
     .review-card .cover-placeholder {
       width: 100px;
