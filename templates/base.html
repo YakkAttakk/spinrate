@@ -130,7 +130,6 @@
     .review-card-body {
       flex: 1;
       min-width: 0;
-      max-width: calc(100% - 50px);
       padding: 0.75rem 1rem;
       display: flex;
       flex-direction: column;
@@ -138,23 +137,21 @@
     }
     .review-card .cover-wrap {
       flex-shrink: 0;
+      width: 100px;
       align-self: stretch;
-      aspect-ratio: 1 / 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
       overflow: hidden;
       background: var(--cream);
     }
     .review-card .cover {
-      width: 100%;
+      width: 100px;
       height: 100%;
       object-fit: cover;
       display: block;
     }
     .review-card .cover-placeholder {
-      width: 100%;
+      width: 100px;
       height: 100%;
+      min-height: 100px;
       display: flex;
       align-items: center;
       justify-content: center;
