@@ -417,16 +417,67 @@ def wikipedia_info(artist_name):
 
 
 def album_wikipedia_info(artist_name, album_title):
-    """Search Wikipedia for a specific album and return its URL + summary."""
-    import logging
+    """Search Wikipedia for a specific album and return its URL + summary.
+
+    Scoring approach:
+    - Search results include title + snippet (no extra API call needed for scoring)
+    - Score each result by how well the title/snippet matches artist + album
+    - Fetch summary only for the best candidate
+    """
+    import logging, re
     log = logging.getLogger(__name__)
 
-    music_words = ['album', 'record', 'ep', 'lp', 'studio', 'soundtrack',
-                   'compilation', 'single', 'release', 'discography']
+    artist_l = artist_name.lower()
+    album_l  = album_title.lower()
 
-    def fetch_summary(title):
+    def score_hit(hit):
+        """Score a search result hit. Higher = better match."""
+        title   = hit.get('title', '')
+        title_l = title.lower()
+        snippet = re.sub(r'<[^>]+>', '', hit.get('snippet', '')).lower()
+        score   = 0
+
+        # Strong signals: title pattern matches Wikipedia album naming conventions
+        # e.g. "Rumours (Fleetwood Mac album)" or "Rumours (album)"
+        if re.search(r'\(.*album\)', title_l):
+            score += 10
+        if re.search(r'\(.*ep\)|\(.*single\)|\(.*soundtrack\)', title_l):
+            score += 8
+
+        # Album title match in page title
+        if album_l in title_l:
+            score += 5
+        elif any(w in title_l for w in album_l.split() if len(w) > 3):
+            score += 2
+
+        # Artist name in page title (e.g. "Rumours (Fleetwood Mac album)")
+        if artist_l in title_l:
+            score += 4
+        elif any(w in title_l for w in artist_l.split() if len(w) > 3):
+            score += 2
+
+        # Snippet signals
+        if 'studio album' in snippet or 'debut album' in snippet:
+            score += 3
+        if album_l in snippet:
+            score += 2
+        if artist_l in snippet:
+            score += 2
+        if any(w in snippet for w in ['released', 'recorded', 'tracklist', 'produced by']):
+            score += 1
+
+        # Penalty: clearly not music
+        if re.search(r'\(film\)|\(novel\)|\(book\)|\(tv\)|\(series\)|\(band\)', title_l):
+            score -= 20
+        if re.search(r'\(musician\)|\(singer\)|\(rapper\)', title_l):
+            score -= 5  # artist page, not album
+
+        log.warning(f"    score={score:+d} title={title!r}")
+        return score
+
+    def fetch_summary(page_title):
         try:
-            encoded = urllib.parse.quote(title.replace(' ', '_'))
+            encoded = urllib.parse.quote(page_title.replace(' ', '_'))
             req = urllib.request.Request(
                 f"https://en.wikipedia.org/api/rest_v1/page/summary/{encoded}",
                 headers=HEADERS)
@@ -435,13 +486,6 @@ def album_wikipedia_info(artist_name, album_title):
         except Exception:
             return None
 
-    def is_album_page(data):
-        if not data or data.get('type') == 'disambiguation':
-            return False
-        description = data.get('description', '').lower()
-        extract     = data.get('extract', '').lower()[:400]
-        return any(w in description or w in extract for w in music_words)
-
     def extract_result(data):
         summary = data.get('extract', '')
         if len(summary) > 400:
@@ -449,9 +493,9 @@ def album_wikipedia_info(artist_name, album_title):
         wiki_url = data.get('content_urls', {}).get('desktop', {}).get('page')
         return wiki_url, summary
 
-    log.warning(f"WIKI SEARCH: artist={artist_name!r} album={album_title!r}")
+    log.warning(f"ALBUM WIKI SEARCH: artist={artist_name!r} album={album_title!r}")
 
-    # Search Wikipedia for the album with artist name for disambiguation
+    all_hits = []
     for search_term in [
         f"{album_title} {artist_name} album",
         f"{album_title} album",
@@ -460,7 +504,7 @@ def album_wikipedia_info(artist_name, album_title):
         try:
             qs = urllib.parse.urlencode({
                 'action': 'query', 'list': 'search',
-                'srsearch': search_term, 'srlimit': 5,
+                'srsearch': search_term, 'srlimit': 8,
                 'format': 'json'
             })
             req = urllib.request.Request(
@@ -470,20 +514,37 @@ def album_wikipedia_info(artist_name, album_title):
             hits = results.get('query', {}).get('search', [])
             log.warning(f"  search_term={search_term!r} -> {[h.get('title') for h in hits]}")
             for hit in hits:
-                page_title = hit.get('title', '')
-                data = fetch_summary(page_title)
-                is_music = is_album_page(data)
-                log.warning(f"    page={page_title!r} desc={data.get('description','') if data else 'NONE'!r} is_album={is_music}")
-                if is_music:
-                    url, summary = extract_result(data)
-                    log.warning(f"  -> SELECTED: {url}")
-                    return url, summary
+                # Deduplicate by pageid
+                if not any(h.get('pageid') == hit.get('pageid') for h in all_hits):
+                    all_hits.append(hit)
         except Exception as e:
             log.warning(f"  search_term={search_term!r} EXCEPTION: {e}")
             continue
 
-    log.warning(f"  -> NO RESULT for {album_title!r} by {artist_name!r}")
-    return None, None
+    if not all_hits:
+        log.warning(f"  -> NO RESULTS for {album_title!r} by {artist_name!r}")
+        return None, None
+
+    # Score all candidates and pick the best
+    scored = sorted(all_hits, key=score_hit, reverse=True)
+    best = scored[0]
+    best_score = score_hit(best)
+
+    log.warning(f"  -> BEST: {best.get('title')!r} score={best_score}")
+
+    # Only accept if score is positive (some signal it's an album page)
+    if best_score <= 0:
+        log.warning(f"  -> REJECTED (score too low)")
+        return None, None
+
+    data = fetch_summary(best.get('title', ''))
+    if not data or data.get('type') == 'disambiguation':
+        log.warning(f"  -> DISAMBIGUATION or fetch failed")
+        return None, None
+
+    url, summary = extract_result(data)
+    log.warning(f"  -> SELECTED: {url}")
+    return url, summary
 
 def fetch_infobox(wiki_url):
     """Fetch and parse the Wikipedia infobox for a given page URL.
