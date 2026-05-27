@@ -20,13 +20,6 @@
     <div class="feed">
       {% for r in reviews %}
       <div class="review-card">
-        {% if r.cover_url %}
-          <img class="cover" src="{{ r.cover_url }}" alt="{{ r.album_title }}" loading="lazy"
-               onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
-          <div class="cover-placeholder" style="display:none;">🎵</div>
-        {% else %}
-          <div class="cover-placeholder">🎵</div>
-        {% endif %}
         <div class="review-card-body">
           <div class="review-meta">
             {{ r.created[:10] }}
@@ -65,7 +58,6 @@
           {% else %}
             <div class="cover-placeholder">🎵</div>
           {% endif %}
-        </div>
         </div>
       </div>
       {% endfor %}
